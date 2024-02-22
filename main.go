@@ -1,11 +1,17 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"time"
 
+	"gopkg.in/telebot.v3"
 	tele "gopkg.in/telebot.v3"
+)
+
+const (
+	notificationTime = "09:00"
 )
 
 func main() {
@@ -28,22 +34,55 @@ func main() {
 		// All the text messages that weren't
 		// captured by existing handlers.
 
-		// var (
-		// 	user = c.Sender()
-		// 	text = c.Text()
-		// )
+		var (
+			user = c.Sender()
+			text = c.Text()
+		)
+
+		fmt.Printf("sender:%+v", user.ID)
 
 		// Use full-fledged bot's functions
 		// only if you need a result:
-		// _, err := b.Send(user, text)
-		// if err != nil {
-		// 	return err
-		// }
+		_, err := b.Send(user, text)
+		if err != nil {
+			return err
+		}
 
-		// return nil
+		return nil
 		// // Instead, prefer a context short-hand:
-		return c.Send("反弹")
+		// return c.Send("反弹")
 	})
 
+	go sendDailyNotifications(b)
+
 	b.Start()
+}
+
+func sendDailyNotifications(bot *telebot.Bot) {
+	// for {
+	// 	now := time.Now().Format("15:04")
+	// 	if now == notificationTime {
+	// 		// 发送每日通知消息给所有用户
+	// 		users := []string{"m4kvkg1x0gucjhcceikj"} // 在这里添加你想要通知的用户的 ID
+	// 		for _, userID := range users {
+	// 			msg := "这是每日通知！"
+	// 			_, err := bot.Send(telebot.ChatID(6712322969), msg)
+	// 			if err != nil {
+	// 				log.Printf("无法发送消息给用户 %s: %v", userID, err)
+	// 			}
+	// 		}
+	// 		time.Sleep(time.Minute) // 避免重复发送通知
+	// 	} else {
+	// 		time.Sleep(30 * time.Second) // 每 30 秒检查一次当前时间
+	// 	}
+	// }
+
+	for {
+		msg := "这是每日通知！ 收不到离线推送吗？"
+		_, err := bot.Send(telebot.ChatID(6712322969), msg)
+		if err != nil {
+			fmt.Printf("send fail,err:%v\n", err)
+		}
+		time.Sleep(60 * time.Second)
+	}
 }
