@@ -17,12 +17,14 @@ func GetRandomResponse() string {
 		"Goodbye!",
 	}
 
+	// 返回随机选择的字符串
+	return responses[GetRandomIndex(len(responses))]
+}
+
+func GetRandomIndex(size int) int {
 	// 初始化随机数种子
 	rand.Seed(time.Now().UnixNano())
 
 	// 随机选择一个索引
-	index := rand.Intn(len(responses))
-
-	// 返回随机选择的字符串
-	return responses[index]
+	return rand.Intn(size)
 }
