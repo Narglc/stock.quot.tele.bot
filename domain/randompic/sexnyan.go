@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sync"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 )
@@ -32,12 +33,25 @@ type SexNyanClt struct {
 var _ RandomSrv = &SexNyanClt{}
 
 func init() {
-	AllRandomPicSrv["sexnyan"] = SexNyanClt{
-		Url: "https://sex.nyan.xyz/api/v2/?r18=true",
-	}
+	AllRandomPicSrv["sexnyan"] = GetSexNyanClt()
+	AllRandomPicSrv["nfsw"] = GetSexNyanClt()
 }
 
-func (l SexNyanClt) GetRandomPic() (string, error) {
+var (
+	sexnayClt     *SexNyanClt
+	oncesexnayClt sync.Once
+)
+
+func GetSexNyanClt() *SexNyanClt {
+	oncesexnayClt.Do(func() {
+		sexnayClt = &SexNyanClt{
+			Url: "https://sex.nyan.xyz/api/v2/?r18=true",
+		}
+	})
+	return sexnayClt
+}
+
+func (l *SexNyanClt) GetRandomPic() (string, error) {
 	response, err := http.Get(l.Url)
 	if err != nil {
 		log.Errorf("请求失败: %v", err)

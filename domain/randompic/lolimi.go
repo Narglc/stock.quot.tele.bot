@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sync"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 )
@@ -25,12 +26,24 @@ type LolimiClt struct {
 var _ RandomSrv = &LolimiClt{}
 
 func init() {
-	AllRandomPicSrv["lolimi"] = LolimiClt{
-		Url: "https://api.lolimi.cn/API/meinv/api.php?type=json",
-	}
+	AllRandomPicSrv["lolimi"] = GetLolimiClt()
 }
 
-func (l LolimiClt) GetRandomPic() (string, error) {
+var (
+	lolimiClt    *LolimiClt
+	onelolimiClt sync.Once
+)
+
+func GetLolimiClt() *LolimiClt {
+	onelolimiClt.Do(func() {
+		lolimiClt = &LolimiClt{
+			Url: "https://api.lolimi.cn/API/meinv/api.php?type=json",
+		}
+	})
+	return lolimiClt
+}
+
+func (l *LolimiClt) GetRandomPic() (string, error) {
 	response, err := http.Get(l.Url)
 	if err != nil {
 		log.Errorf("请求失败: %v", err)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sync"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 )
@@ -32,9 +33,21 @@ type LoliconClt struct {
 var _ RandomSrv = &LoliconClt{}
 
 func init() {
-	AllRandomPicSrv["lolicon"] = LoliconClt{
-		Url: "https://api.lolicon.app/setu/v2",
-	}
+	AllRandomPicSrv["lolicon"] = GetLoliconClt()
+}
+
+var (
+	loliconClt    *LoliconClt
+	oneloliconClt sync.Once
+)
+
+func GetLoliconClt() *LoliconClt {
+	oneloliconClt.Do(func() {
+		loliconClt = &LoliconClt{
+			Url: "https://api.lolicon.app/setu/v2",
+		}
+	})
+	return loliconClt
 }
 
 func (l LoliconClt) GetRandomPic() (string, error) {
