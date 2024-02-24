@@ -1,9 +1,9 @@
 package schedule
 
 import (
-	"fmt"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"gopkg.in/telebot.v3"
 )
 
@@ -40,11 +40,11 @@ func sendGoHomeNotifications(bot *telebot.Bot) {
 			currentTime := now.Format("15:04")
 			for _, task := range TaskList {
 				if currentTime == task.Time {
-					fmt.Printf("GroupMap: %+v\n", GroupMap)
+					log.Infof("GroupMap: %+v\n", GroupMap)
 					for group := range GroupMap {
 						_, err = bot.Send(telebot.ChatID(group), task.Msg)
 					}
-					fmt.Printf("sendNotification: Task:%s Time:%s, Msg:%s, err:%+v", task.Name, task.Time, task.Msg, err)
+					log.Infof("sendNotification: Task:%s Time:%s, Msg:%s, err:%+v", task.Name, task.Time, task.Msg, err)
 					time.Sleep(time.Minute) // 避免重复发送通知
 				}
 			}

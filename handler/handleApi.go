@@ -1,12 +1,11 @@
 package handler
 
 import (
-	"fmt"
-
 	"github.com/narglc/stock.quot.tele.bot/dao"
 	"github.com/narglc/stock.quot.tele.bot/domain/randompic"
 	"github.com/narglc/stock.quot.tele.bot/schedule"
 	"github.com/narglc/stock.quot.tele.bot/utils"
+	log "github.com/sirupsen/logrus"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -27,7 +26,7 @@ func Register(c tele.Context) error {
 		UserName:  chat.Username,
 	}
 
-	fmt.Printf("sender:[%d - %s] chatinfo:[%+v], text:%+v\n", user.ID, user.FirstName, chatinfo, text)
+	log.Infof("sender:[%d - %s] chatinfo:[%+v], text:%+v\n", user.ID, user.FirstName, chatinfo, text)
 
 	var err error
 	if _, ok := schedule.GroupMap[chat.ID]; ok {
@@ -37,7 +36,7 @@ func Register(c tele.Context) error {
 		if err == nil {
 			schedule.GroupMap[chat.ID] = chatinfo
 		}
-		fmt.Printf("register GroupList: %+v\n", schedule.GroupMap)
+		log.Infof("register GroupList: %+v\n", schedule.GroupMap)
 	}
 
 	return err
@@ -52,7 +51,7 @@ func OnText(c tele.Context) error {
 		text = c.Text()
 	)
 
-	fmt.Printf("sender:[%d - %s] chat:[%d - %s], text:%+v", user.ID, user.FirstName, chat.ID, chat.Title, text)
+	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v", user.ID, user.FirstName, chat.ID, chat.Title, text)
 
 	_, err := c.Bot().Send(user, text)
 	if err != nil {
@@ -69,7 +68,7 @@ func OnSticker(c tele.Context) error {
 		sticker = c.Message().Sticker
 	)
 
-	fmt.Printf("sender:[%d - %s] chat:[%d - %s], sticker[%s-%s]\n", user.ID, user.FirstName, chat.ID, chat.Title, sticker.File.FileID, sticker.File.UniqueID)
+	log.Infof("sender:[%d - %s] chat:[%d - %s], sticker[%s-%s]\n", user.ID, user.FirstName, chat.ID, chat.Title, sticker.File.FileID, sticker.File.UniqueID)
 
 	err := dao.SaveSticker(sticker.File.FileID)
 	if err == nil {
@@ -88,7 +87,7 @@ func OnPhoto(c tele.Context) error {
 		msg  = c.Message().Photo
 	)
 
-	fmt.Printf("sender:[%d - %s] chat:[%d - %s], text:%+v\n", user.ID, user.FirstName, chat.ID, chat.Title, msg)
+	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v\n", user.ID, user.FirstName, chat.ID, chat.Title, msg)
 
 	_, err := c.Bot().Send(user, msg)
 	if err != nil {
@@ -104,15 +103,29 @@ func Wakeup(c tele.Context) error {
 		chat = c.Chat() // 群聊时, user = sender, chat=group
 	)
 
-	picUrl := randompic.GetRandomPic()
+	var file tele.File
+	picUrl, err := randompic.GetRandomPic()
+	if err != nil {
+		file = tele.File{
+			FileID: dao.DefaultSticker,
+		}
+	} else {
+		file = tele.FromURL(picUrl)
+	}
 
 	photo := &tele.Photo{
-		File:    tele.FromURL(picUrl),
+		File:    file,
 		Caption: "大师助你提神醒脑",
 	}
 
-	_, err := c.Bot().Send(chat, photo)
+	_, err = c.Bot().Send(chat, photo)
 	if err != nil {
+		// 重发特定图一张图
+		_, err = c.Bot().Send(chat, &tele.Photo{
+			File: tele.File{
+				FileID: "AgACAgUAAxkBAAOnZdlosGgesXYzp0ad8B_IOn_TfXgAAqC7MRtYz8hW04RvCVu0_6QBAAMCAAN5AAM0BA",
+			},
+		})
 		return err
 	}
 

@@ -1,24 +1,28 @@
 package stocks
 
 import (
-	"io/ioutil"
-	"log"
+	"io"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 )
 
-func GetStock() {
+func GetStock() error {
 	url := "https://stock.xueqiu.com/v5/stock/realtime/quotec.json?symbol=SH601001,SZ002617"
 
 	response, err := http.Get(url)
 	if err != nil {
-		log.Fatalf("请求失败: %v", err)
+		log.Errorf("请求失败: %v", err)
+		return err
 	}
 	defer response.Body.Close()
 
-	body, err := ioutil.ReadAll(response.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		log.Fatalf("读取响应失败: %v", err)
+		log.Errorf("读取响应失败: %v", err)
+		return err
 	}
 
 	log.Println("响应：", string(body))
+	return nil
 }

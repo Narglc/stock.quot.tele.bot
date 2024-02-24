@@ -1,9 +1,10 @@
 package main
 
 import (
-	"log"
 	"os"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/narglc/stock.quot.tele.bot/dao"
 	"github.com/narglc/stock.quot.tele.bot/handler"
