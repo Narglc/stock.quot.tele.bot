@@ -18,14 +18,20 @@ type LolimiRsp struct {
 	Data LolimiData `json:"data"`
 }
 
-const (
-	DefaultPics = "http://img5.adesk.com/605455dae7bce72db9fefd3c?sign=8fa8c7f1efd9741a1c529daca53e68c8&t=65d8a9d1"
-)
+type LolimiClt struct {
+	Url string
+}
 
-func GetRandomPic() (string, error) {
-	url := "https://api.lolimi.cn/API/meinv/api.php?type=json"
+var _ RandomSrv = &LolimiClt{}
 
-	response, err := http.Get(url)
+func init() {
+	AllRandomPicSrv["lolimi"] = LolimiClt{
+		Url: "https://api.lolimi.cn/API/meinv/api.php?type=json",
+	}
+}
+
+func (l LolimiClt) GetRandomPic() (string, error) {
+	response, err := http.Get(l.Url)
 	if err != nil {
 		log.Errorf("请求失败: %v", err)
 		return "", err

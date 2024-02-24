@@ -99,12 +99,20 @@ func OnPhoto(c tele.Context) error {
 
 func Wakeup(c tele.Context) error {
 	var (
-		// user = c.Sender()		// 私聊时, user == chat
-		chat = c.Chat() // 群聊时, user = sender, chat=group
+		user    = c.Sender() // 私聊时, user == chat
+		chat    = c.Chat()   // 群聊时, user = sender, chat=group
+		payload = c.Message().Payload
 	)
+	if payload == "" {
+		if user.ID == 6225152335 {
+			payload = "lolimi"
+		} else {
+			payload = "lolicon"
+		}
+	}
 
 	var file tele.File
-	picUrl, err := randompic.GetRandomPic()
+	picUrl, err := randompic.GetRandomPic(payload)
 	if err != nil {
 		file = tele.File{
 			FileID: dao.DefaultSticker,
@@ -120,6 +128,7 @@ func Wakeup(c tele.Context) error {
 
 	_, err = c.Bot().Send(chat, photo)
 	if err != nil {
+		log.Warnf("Send %s pic first time fail, err:%+v", payload, err)
 		// 重发特定图一张图
 		_, err = c.Bot().Send(chat, &tele.Photo{
 			File: tele.File{
