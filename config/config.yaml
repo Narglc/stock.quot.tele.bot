@@ -1,0 +1,7 @@
+logger:
+  level: "debug"
+  logPath: "logs/tele.bog.log"
+  maxSize: 500
+  maxBackups: 15
+  maxAge: 28
+  commpress: true

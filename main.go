@@ -1,18 +1,29 @@
 package main
 
 import (
+	"flag"
+	"log"
 	"os"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
+	"github.com/narglc/stock.quot.tele.bot/config"
 	"github.com/narglc/stock.quot.tele.bot/dao"
 	"github.com/narglc/stock.quot.tele.bot/handler"
+	logger "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 	"github.com/narglc/stock.quot.tele.bot/schedule"
 	tele "gopkg.in/telebot.v3"
 )
 
+var configPath = flag.String("f", "./config/config.yaml", "config file")
+
 func main() {
+	appConfig, cfg_succ := config.InitConfig(*configPath)
+	if !cfg_succ {
+		panic("config init fail.")
+	}
+
+	logger.SetLoggerConfig(&appConfig.LoggerConfig)
+
 	pref := tele.Settings{
 		Token:  os.Getenv("TOKEN"),
 		Poller: &tele.LongPoller{Timeout: 10 * time.Second},

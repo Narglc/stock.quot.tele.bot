@@ -11,6 +11,7 @@ var (
 const (
 	StickerKey     = "tg:gohome:stickers"
 	DefaultSticker = "CAACAgUAAxkBAANfZdi2KCTWFlynDPTbSoFw_rgEROUAAiYHAAJ9YeBUYjyPIdkXdGA0BA"
+	PhotoKey       = "tg:gohome:pics"
 )
 
 func InitRdb(rdbUrl string) {
@@ -34,4 +35,13 @@ func GetRandomSticker() (string, error) {
 		return "", err
 	}
 	return fileId, nil
+}
+
+func SavePhotos(fileId string) error {
+	// 将sticker fileId存储到Redis的集合类型中
+	_, err := rdb.SAdd(PhotoKey, fileId).Result()
+	if err != nil {
+		return err
+	}
+	return nil
 }

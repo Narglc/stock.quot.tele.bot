@@ -4,7 +4,7 @@ import (
 	"io"
 	"net/http"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 )
 
 func GetStock() error {
@@ -23,6 +23,6 @@ func GetStock() error {
 		return err
 	}
 
-	log.Println("响应：", string(body))
+	log.Infof("响应：%s", string(body))
 	return nil
 }

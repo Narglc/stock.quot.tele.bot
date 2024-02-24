@@ -3,7 +3,7 @@ package schedule
 import (
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 	"gopkg.in/telebot.v3"
 )
 
@@ -12,7 +12,7 @@ var TaskList = []Task{
 	{"中场", "07:00", "三点几啦！饮茶先啦！"},
 	{"下班", "09:55", "准备下班了，老铁们!!!"},
 	{"下班", "09:57", "仲有三魂钟，激不激动，兴不兴奋???"},
-	{"下班", "10:00", "滚吧！小老弟! 开启你的精彩夜生活！"},
+	{"下班", "10:00", "滚吧！小老弟! 去开启你的精彩夜生活吧！"},
 }
 
 type ChatInfo struct {
@@ -24,10 +24,6 @@ type ChatInfo struct {
 }
 
 var GroupMap map[int64]ChatInfo = make(map[int64]ChatInfo)
-
-// func init(){
-// 	GroupMap = make(map[int64]ChatInfo)
-// }
 
 func sendGoHomeNotifications(bot *telebot.Bot) {
 	var err error

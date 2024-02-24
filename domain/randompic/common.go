@@ -1,7 +1,7 @@
 package randompic
 
 import (
-	log "github.com/sirupsen/logrus"
+	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 )
 
 const (

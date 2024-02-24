@@ -3,9 +3,9 @@ package handler
 import (
 	"github.com/narglc/stock.quot.tele.bot/dao"
 	"github.com/narglc/stock.quot.tele.bot/domain/randompic"
+	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 	"github.com/narglc/stock.quot.tele.bot/schedule"
 	"github.com/narglc/stock.quot.tele.bot/utils"
-	log "github.com/sirupsen/logrus"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -70,6 +70,7 @@ func OnSticker(c tele.Context) error {
 
 	log.Infof("sender:[%d - %s] chat:[%d - %s], sticker[%s-%s]\n", user.ID, user.FirstName, chat.ID, chat.Title, sticker.File.FileID, sticker.File.UniqueID)
 
+	// sticker存储到redis
 	err := dao.SaveSticker(sticker.File.FileID)
 	if err == nil {
 		if _, err := c.Bot().Send(user, "你的贡品我收下了！"); err != nil {
@@ -82,16 +83,19 @@ func OnSticker(c tele.Context) error {
 
 func OnPhoto(c tele.Context) error {
 	var (
-		user = c.Sender()
-		chat = c.Chat()
-		msg  = c.Message().Photo
+		user  = c.Sender()
+		chat  = c.Chat()
+		photo = c.Message().Photo
 	)
 
-	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v\n", user.ID, user.FirstName, chat.ID, chat.Title, msg)
+	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v\n", user.ID, user.FirstName, chat.ID, chat.Title, photo)
 
-	_, err := c.Bot().Send(user, msg)
-	if err != nil {
-		return err
+	// 图片存储到redis
+	err := dao.SavePhotos(photo.File.FileID)
+	if err == nil {
+		if _, err := c.Bot().Send(user, "你的贡品我收下了！"); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -102,9 +106,10 @@ func Wakeup(c tele.Context) error {
 		user    = c.Sender() // 私聊时, user == chat
 		chat    = c.Chat()   // 群聊时, user = sender, chat=group
 		payload = c.Message().Payload
+		text    = c.Text()
 	)
 	if payload == "" {
-		if user.ID == 6225152335 {
+		if user.ID == 6712322969 {
 			payload = "lolimi"
 		} else {
 			payload = "lolicon"
@@ -121,12 +126,14 @@ func Wakeup(c tele.Context) error {
 		file = tele.FromURL(picUrl)
 	}
 
+	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v, picUrl:%+v \n", user.ID, user.FirstName, chat.ID, chat.Title, text, picUrl)
+
 	photo := &tele.Photo{
 		File:    file,
 		Caption: "大师助你提神醒脑",
 	}
 
-	_, err = c.Bot().Send(chat, photo)
+	msg, err := c.Bot().Send(chat, photo)
 	if err != nil {
 		log.Warnf("Send %s pic first time fail, err:%+v", payload, err)
 		// 重发特定图一张图
@@ -137,16 +144,25 @@ func Wakeup(c tele.Context) error {
 		})
 		return err
 	}
+	// 图片存储到redis
+	dao.SavePhotos(msg.Photo.File.FileID)
 
 	return nil
 }
 
 func Sticker(c tele.Context) error {
+	var (
+		user = c.Sender() // 私聊时, user == chat
+		chat = c.Chat()   // 群聊时, user = sender, chat=group
+		text = c.Text()
+	)
+
 	fileid, err := dao.GetRandomSticker()
 	if err != nil {
 		fileid = dao.DefaultSticker
 	}
 
+	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v \n", user.ID, user.FirstName, chat.ID, chat.Title, text)
 	stker := &tele.Sticker{
 		File: tele.File{
 			FileID: fileid,

@@ -15,6 +15,7 @@ func GetRandomResponse() string {
 		"叼毛，好好工作！",
 		"大师我一生只做一件事",
 		"Goodbye!",
+		"杰哥不要啦！",
 	}
 
 	// 返回随机选择的字符串

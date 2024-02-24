@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 )
 
 type UrlData struct {
