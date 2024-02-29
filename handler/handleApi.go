@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"math/rand"
+	"time"
+
 	"github.com/narglc/stock.quot.tele.bot/dao"
 	"github.com/narglc/stock.quot.tele.bot/domain/randompic"
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
@@ -101,6 +104,19 @@ func OnPhoto(c tele.Context) error {
 	return nil
 }
 
+func getRandomPicSrc() string {
+	picSrc := []string{
+		"lolimi",
+		"lolicon",
+		"sexnyan",
+	}
+
+	seed := time.Now().UnixNano()                                    // rand内部运算的随机数
+	idx := rand.New(rand.NewSource(seed)).Int31n(int32(len(picSrc))) // rand计算得到的随机数
+
+	return picSrc[idx]
+}
+
 func Wakeup(c tele.Context) error {
 	var (
 		user    = c.Sender() // 私聊时, user == chat
@@ -109,11 +125,7 @@ func Wakeup(c tele.Context) error {
 		text    = c.Text()
 	)
 	if payload == "" {
-		if user.ID == 6712322969 {
-			payload = "lolimi"
-		} else {
-			payload = "lolicon"
-		}
+		payload = getRandomPicSrc()
 	}
 
 	var file tele.File
@@ -126,7 +138,7 @@ func Wakeup(c tele.Context) error {
 		file = tele.FromURL(picUrl)
 	}
 
-	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v, picUrl:%+v \n", user.ID, user.FirstName, chat.ID, chat.Title, text, picUrl)
+	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v, payload:%+v picUrl:%+v \n", user.ID, user.FirstName, chat.ID, chat.Title, text, payload, picUrl)
 
 	photo := &tele.Photo{
 		File:    file,
@@ -137,11 +149,7 @@ func Wakeup(c tele.Context) error {
 	if err != nil {
 		log.Warnf("Send %s pic first time fail, err:%+v", payload, err)
 		// 重发特定图一张图
-		_, err = c.Bot().Send(chat, &tele.Photo{
-			File: tele.File{
-				FileID: "AgACAgUAAxkBAAOnZdlosGgesXYzp0ad8B_IOn_TfXgAAqC7MRtYz8hW04RvCVu0_6QBAAMCAAN5AAM0BA",
-			},
-		})
+		_, err = c.Bot().Send(chat, "图图太大了，小老弟我搬不动呀！")
 		return err
 	}
 	// 图片存储到redis
