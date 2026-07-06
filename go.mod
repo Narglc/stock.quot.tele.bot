@@ -5,6 +5,7 @@ go 1.21.3
 require (
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/natefinch/lumberjack v2.0.0+incompatible
+	github.com/robfig/cron v1.2.0
 	github.com/sirupsen/logrus v1.6.0
 	github.com/spf13/viper v1.13.0
 	gopkg.in/telebot.v3 v3.2.1

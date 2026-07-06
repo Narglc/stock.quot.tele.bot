@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"log"
 	"os"
@@ -16,7 +17,21 @@ import (
 
 var configPath = flag.String("f", "./config/config.yaml", "config file")
 
+func validateConfig() error {
+	if os.Getenv("TOKEN") == "" {
+		return errors.New("TOKEN environment variable is required")
+	}
+	if os.Getenv("RDB_URL") == "" {
+		return errors.New("RDB_URL environment variable is required")
+	}
+	return nil
+}
+
 func main() {
+	if err := validateConfig(); err != nil {
+		log.Fatalf("Configuration validation failed: %v", err)
+	}
+
 	appConfig, cfg_succ := config.InitConfig(*configPath)
 	if !cfg_succ {
 		panic("config init fail.")
@@ -69,3 +84,9 @@ func main() {
 
 	b.Start()
 }
+
+// func initScheduler() *cron.Cron {
+// 	c := cron.New()
+// 	c.AddFunc("0 18 * * 1-5", sendGoHomeNotification)
+// 	return c
+// }

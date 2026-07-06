@@ -7,6 +7,11 @@ import (
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 )
 
+type StockService interface {
+	GetQuote(symbol string) (*StockQuote, error)
+	FormatQuoteMessage(*StockQuote) string
+}
+
 func GetStock() error {
 	url := "https://stock.xueqiu.com/v5/stock/realtime/quotec.json?symbol=SH601001,SZ002617"
 

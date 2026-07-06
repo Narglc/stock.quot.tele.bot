@@ -167,6 +167,7 @@ func Sticker(c tele.Context) error {
 
 	fileid, err := dao.GetRandomSticker()
 	if err != nil {
+		log.Infof("rds err: %v", err.Error())
 		fileid = dao.DefaultSticker
 	}
 
