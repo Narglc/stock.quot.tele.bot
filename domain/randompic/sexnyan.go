@@ -70,5 +70,10 @@ func (l *SexNyanClt) GetRandomPic() (string, error) {
 		return DefaultPics, nil
 	}
 
+	if len(llrsp.Data) == 0 {
+		log.Warnf("sexnyan 返回空数据, msg:%s", llrsp.Msg)
+		return DefaultPics, nil
+	}
+
 	return llrsp.Data[0].Url, nil
 }

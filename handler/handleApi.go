@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"bytes"
+	"io"
 	"math/rand"
+	"net/http"
 	"time"
 
 	"github.com/narglc/stock.quot.tele.bot/dao"
@@ -148,7 +151,19 @@ func Wakeup(c tele.Context) error {
 	msg, err := c.Bot().Send(chat, photo)
 	if err != nil {
 		log.Warnf("Send %s pic first time fail, err:%+v", payload, err)
-		// 重发特定图一张图
+		// 大图兜底：直接按 URL 发送常因超过 5MB / 尺寸限制失败，
+		// 这里下载后作为文件（Document，上限 50MB 且不校验图片尺寸）重发。
+		if picUrl != "" {
+			if doc, derr := downloadAsDocument(picUrl); derr == nil {
+				if _, serr := c.Bot().Send(chat, doc); serr == nil {
+					return nil
+				} else {
+					log.Warnf("Send %s as document fail, err:%+v", payload, serr)
+				}
+			} else {
+				log.Warnf("download %s fail, err:%+v", payload, derr)
+			}
+		}
 		_, err = c.Bot().Send(chat, "图图太大了，小老弟我搬不动呀！")
 		return err
 	}
@@ -156,6 +171,28 @@ func Wakeup(c tele.Context) error {
 	dao.SavePhotos(msg.Photo.File.FileID)
 
 	return nil
+}
+
+// downloadAsDocument 下载图片并封装为 Telegram 文件（Document）。
+// 用于原图过大、无法按图片发送时的兜底，可绕过 sendPhoto 的尺寸/大小限制。
+func downloadAsDocument(url string) (*tele.Document, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return &tele.Document{
+		File:     tele.FromReader(bytes.NewReader(data)),
+		FileName: "wakeup.jpg",
+		Caption:  "大师助你提神醒脑（原图）",
+	}, nil
 }
 
 func Sticker(c tele.Context) error {

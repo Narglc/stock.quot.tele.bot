@@ -10,4 +10,5 @@ type Task struct {
 
 func ScheduleTask(bot *telebot.Bot) {
 	go sendGoHomeNotifications(bot)
+	go sendCryptoBroadcast(bot)
 }

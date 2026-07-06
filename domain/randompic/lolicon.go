@@ -11,6 +11,7 @@ import (
 )
 
 type UrlData struct {
+	Regular  string `json:"regular"`
 	Original string `json:"original"`
 }
 
@@ -51,7 +52,9 @@ func GetLoliconClt() *LoliconClt {
 }
 
 func (l LoliconClt) GetRandomPic() (string, error) {
-	data := []byte(`{"r18": 1}`)
+	// 请求 regular 尺寸（长边最大 1000px），避免 original 原图过大导致
+	// Telegram 发送时超过 5MB / 尺寸限制而失败。
+	data := []byte(`{"r18": 1, "size": ["regular", "original"]}`)
 
 	// 发送POST请求
 	response, err := http.Post(l.Url, "application/json", bytes.NewBuffer(data))
@@ -73,5 +76,14 @@ func (l LoliconClt) GetRandomPic() (string, error) {
 		return DefaultPics, nil
 	}
 
+	if len(llrsp.Data) == 0 {
+		log.Warnf("lolicon 返回空数据, error:%s", llrsp.Error)
+		return DefaultPics, nil
+	}
+
+	// 优先使用较小的 regular 尺寸，缺失时回退 original
+	if url := llrsp.Data[0].Urls.Regular; url != "" {
+		return url, nil
+	}
 	return llrsp.Data[0].Urls.Original, nil
 }
