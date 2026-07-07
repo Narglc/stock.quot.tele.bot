@@ -9,33 +9,58 @@ import (
 	"github.com/spf13/viper"
 )
 
+type TelegramConfig struct {
+	Token string `mapstructure:"token"`
+}
+
+type RedisConfig struct {
+	URL string `mapstructure:"url"`
+}
+
+type MCPConfig struct {
+	Addr         string `mapstructure:"addr"`
+	TargetChatID int64  `mapstructure:"target_chat_id"`
+}
+
 type Config struct {
+	Telegram TelegramConfig `mapstructure:"telegram"`
+	Redis    RedisConfig    `mapstructure:"redis"`
+	MCP      MCPConfig      `mapstructure:"mcp"`
 	// 日志
 	LoggerConfig logger.LoggerConfig `json:"logger" mapstructure:"logger"`
 }
 
-// 返回err
+// InitConfig 以配置文件为主、环境变量可覆盖的方式加载配置。
+// 敏感项（token/redis url）在 yaml 留空，由 TOKEN/RDB_URL 环境变量提供。
 func InitConfig(configPath string) (*Config, bool) {
-	var conf Config
-	_, err := os.Stat(configPath)
-	if err != nil {
+	if _, err := os.Stat(configPath); err != nil {
 		return nil, false
 	}
 
+	viper.Reset()
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("yaml")
 
-	err = viper.ReadInConfig()
-	if err != nil {
+	viper.SetDefault("mcp.addr", ":8081")
+
+	viper.AutomaticEnv()
+	// 显式绑定，兼容现有 TOKEN / RDB_URL 环境变量命名。
+	_ = viper.BindEnv("telegram.token", "TOKEN")
+	_ = viper.BindEnv("redis.url", "RDB_URL")
+	_ = viper.BindEnv("mcp.target_chat_id", "MCP_TARGET_CHAT_ID")
+	_ = viper.BindEnv("mcp.addr", "MCP_ADDR")
+
+	if err := viper.ReadInConfig(); err != nil {
 		fmt.Printf("config file %s read failed. %v\n", configPath, err)
 		return nil, false
 	}
-	err = viper.GetViper().Unmarshal(&conf)
-	if err != nil {
+
+	var conf Config
+	if err := viper.Unmarshal(&conf); err != nil {
 		fmt.Printf("config file %s loaded failed. %v\n", configPath, err)
 		return nil, false
 	}
 
-	fmt.Printf("config %s %+v load ok!\n", configPath, conf)
+	fmt.Printf("config %s loaded ok! mcp.addr=%s target=%d\n", configPath, conf.MCP.Addr, conf.MCP.TargetChatID)
 	return &conf, true
 }
