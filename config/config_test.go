@@ -43,7 +43,7 @@ func TestInitConfig_AddrDefault(t *testing.T) {
 	if !ok {
 		t.Fatal("InitConfig failed")
 	}
-	if cfg.MCP.Addr != ":8081" {
-		t.Errorf("Addr = %q, want :8081", cfg.MCP.Addr)
+	if cfg.MCP.Addr != "127.0.0.1:8081" {
+		t.Errorf("Addr = %q, want 127.0.0.1:8081", cfg.MCP.Addr)
 	}
 }

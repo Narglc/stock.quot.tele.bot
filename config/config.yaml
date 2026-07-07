@@ -3,7 +3,7 @@ telegram:
 redis:
   url: ""              # 留空，用 RDB_URL 环境变量覆盖
 mcp:
-  addr: ":8081"
+  addr: "127.0.0.1:8081"
   target_chat_id: 0    # 设为自己的 chat_id 才启用 MCP（0=不启用）
 logger:
   level: "debug"

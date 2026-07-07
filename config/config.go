@@ -41,7 +41,7 @@ func InitConfig(configPath string) (*Config, bool) {
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("yaml")
 
-	viper.SetDefault("mcp.addr", ":8081")
+	viper.SetDefault("mcp.addr", "127.0.0.1:8081")
 
 	viper.AutomaticEnv()
 	// 显式绑定，兼容现有 TOKEN / RDB_URL 环境变量命名。
