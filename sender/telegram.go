@@ -19,6 +19,7 @@ type TelegramSender struct {
 	target int64
 }
 
+// NewTelegramSender 构造一个 TelegramSender，向固定 target chat 发送消息。
 func NewTelegramSender(bot telebotAPI, target int64) *TelegramSender {
 	return &TelegramSender{bot: bot, target: target}
 }
@@ -33,7 +34,7 @@ func (t *TelegramSender) Send(md string) (string, error) {
 		if msg, err := t.bot.Send(to, html, tele.ModeHTML); err == nil {
 			return strconv.Itoa(msg.ID), nil
 		} else {
-			log.Warnf("MCP 发送 HTML 失败，降级纯文本重发: %v", err)
+			log.Warnf("Telegram 发送 HTML 失败，降级纯文本重发: %v", err)
 		}
 	} else {
 		log.Warnf("markdown 转换失败，降级纯文本: %v", cerr)
