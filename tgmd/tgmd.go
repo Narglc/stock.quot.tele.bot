@@ -10,8 +10,8 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-// gm 复用同一个解析器实例（含 GFM：删除线/表格/autolink）。
-var gm = goldmark.New(goldmark.WithExtensions(extension.GFM))
+// gm 复用同一个解析器实例（只启用删除线，避免 Table 等无处理分支的扩展产生乱码）。
+var gm = goldmark.New(goldmark.WithExtensions(extension.Strikethrough))
 
 // Convert 把标准 markdown 转成 Telegram 支持的 HTML 子集。
 // 不支持的结构（标题/列表/表格）降级为粗体/项目符号/纯文本。
@@ -30,7 +30,12 @@ func Convert(md string) (string, error) {
 			}
 		case *ast.Paragraph:
 			if !entering {
-				b.WriteString("\n\n")
+				// 顶层段落之间空行；列表项/引用内不额外加，spacing 交给容器分支
+				switch node.Parent().(type) {
+				case *ast.ListItem, *ast.Blockquote:
+				default:
+					b.WriteString("\n\n")
+				}
 			}
 		case *ast.Blockquote:
 			if entering {

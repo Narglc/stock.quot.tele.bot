@@ -18,6 +18,11 @@ func TestConvert(t *testing.T) {
 		{"list", "- a\n- b", "• a\n• b"},
 		{"code_block", "```\nfoo\nbar\n```", "<pre>foo\nbar</pre>"},
 		{"mixed", "**a** and `b`", "<b>a</b> and <code>b</code>"},
+		{"blockquote", "> line1\n> line2", "<blockquote>line1\nline2</blockquote>"},
+		{"loose_list", "- a\n\n- b", "• a\n• b"},
+		{"ordered_list", "1. one\n2. two", "• one\n• two"},
+		{"href_escape", "[x](https://a.com/?a=1&b=2)", `<a href="https://a.com/?a=1&amp;b=2">x</a>`},
+		{"table_degrade", "| a | b |", "| a | b |"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
