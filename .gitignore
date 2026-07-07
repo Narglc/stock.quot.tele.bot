@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# 本项目构建产物（go build -o bot main.go）
+/bot
+
 # Test binary, built with `go test -c`
 *.test
 

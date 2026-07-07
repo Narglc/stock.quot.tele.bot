@@ -39,7 +39,14 @@ func sendGoHomeNotifications(bot *telebot.Bot) {
 				if currentTime == task.Time {
 					log.Infof("GroupMap: %+v\n", GroupMap)
 					for group := range GroupMap {
-						_, err = bot.Send(telebot.ChatID(group), task.Msg)
+						if _, serr := bot.Send(telebot.ChatID(group), task.Msg); serr != nil {
+							err = serr
+							log.Warnf("提醒发送失败 group:%d err:%v", group, serr)
+							if IsBotEvicted(serr) {
+								UnregisterGroup(group)
+								log.Infof("提醒判定 bot 已被移出 group:%d，已注销", group)
+							}
+						}
 					}
 					log.Infof("sendNotification: Task:%s Time:%s, Msg:%s, err:%+v", task.Name, task.Time, task.Msg, err)
 					time.Sleep(time.Minute) // 避免重复发送通知

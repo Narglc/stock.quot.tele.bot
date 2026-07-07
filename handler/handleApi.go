@@ -68,12 +68,29 @@ func Register(c tele.Context) error {
 	} else {
 		_, err = c.Bot().Send(chat, "大师已就位！敬请期待！")
 		if err == nil {
-			schedule.GroupMap[chat.ID] = chatinfo
+			schedule.RegisterGroup(chat.ID, chatinfo)
 		}
 		log.Infof("register GroupList: %+v\n", schedule.GroupMap)
 	}
 
 	return err
+}
+
+// OnMyChatMember 监听 bot 自身成员状态变化：被踢出/移出群时实时注销该 chat。
+func OnMyChatMember(c tele.Context) error {
+	upd := c.Update().MyChatMember
+	if upd == nil || upd.NewChatMember == nil {
+		return nil
+	}
+
+	role := upd.NewChatMember.Role
+	chat := upd.Chat
+	if role == tele.Kicked || role == tele.Left {
+		schedule.UnregisterGroup(chat.ID)
+		log.Infof("bot 被移出 chat:[%d - %s] role:%s，已注销", chat.ID, chat.Title, role)
+	}
+
+	return nil
 }
 
 func OnText(c tele.Context) error {
