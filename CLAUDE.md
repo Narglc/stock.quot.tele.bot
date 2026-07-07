@@ -23,13 +23,14 @@ go mod tidy
 ```
 
 - 本地调试用 `.vscode/launch.json`，其中已内联 `TOKEN` / `RDB_URL` 环境变量。
-- 没有测试文件，无 lint 配置。
-- 配置分两层：**敏感项走环境变量**（`TOKEN`、`RDB_URL`，在 `main.go:validateConfig` 校验），**非敏感项走 `config/config.yaml`**（目前仅日志配置）。
+- 单元测试：`tgmd` / `sender` / `mcpserver` / `config` 有测试（`go test ./...`）；无 lint 配置。
+- **需 Go ≥ 1.25.5**（`mark3labs/mcp-go` 的最低要求，`go.mod` 已声明）；`GOTOOLCHAIN=auto`（默认）会自动切换/下载对应工具链。
+- 配置统一走 viper（`config/config.go`）：**配置文件 `config/config.yaml` 为主，敏感项（`telegram.token`、`redis.url`）留空由环境变量 `TOKEN` / `RDB_URL` 覆盖**（`viper.AutomaticEnv` + 显式 `BindEnv`）。MCP 相关：`mcp.target_chat_id`（`MCP_TARGET_CHAT_ID`）、`mcp.addr`（`MCP_ADDR`，默认 `:8081`）。`main.go:validateConfig` 校验合并后的 token / redis url 非空。
 
 ## 架构要点
 
 ### 启动流程（main.go）
-校验环境变量 → 加载 yaml 配置 → 初始化 logger → 初始化 Redis（`dao.InitRdb`）→ 创建 bot 并注册 handler → 启动定时任务 goroutine（`schedule.ScheduleTask`）→ `b.Start()` 长轮询。
+加载 viper 配置（`config.InitConfig`）→ 校验 token/redis → 初始化 logger → 初始化 Redis（`dao.InitRdb`）→ 创建 bot 并注册 handler → 从 Redis 恢复群列表（`schedule.LoadGroups`）→（若 `mcp.target_chat_id != 0`）注册 `TelegramSender` 并起 MCP goroutine（`mcpserver.Serve`）→ 启动定时任务 goroutine（`schedule.ScheduleTask`）→ `b.Start()` 长轮询。
 
 ### 命令与 handler（handler/handleApi.go）
 - `/register` — 把当前 chat 登记进 `schedule.GroupMap`，之后才会收到定时提醒。
@@ -54,6 +55,12 @@ go mod tidy
 
 ### 日志（pkg/logger/logger.go）
 自封装的 logrus 包装层，包级函数 `log.Infof` 等直接可用（`GetLogger()` 通过 `runtime.Caller` 注入调用处 `__src`）。支持 lumberjack 滚动切割，由 `config.yaml` 的 logger 段驱动。全项目统一以 `log "github.com/narglc/stock.quot.tele.bot/pkg/logger"` 别名导入。
+
+### MCP 发消息服务（mcpserver/ + sender/ + tgmd/）
+供自己的 agent 通过 MCP 发消息。`config.MCP.TargetChatID != 0` 时，`main.go` 构造 `TelegramSender` 注册进 `sender` 注册表并在 goroutine 启动 `mcpserver.Serve`（`mark3labs/mcp-go`，Streamable HTTP，默认 `:8081/mcp`）。
+- tool：`send_message(platform="telegram", text)`，`text` 为标准 markdown。
+- 发送链路：`tgmd.Convert`（`goldmark` 解析 AST → 只输出 Telegram 支持的 HTML 标签子集，标题/列表/表格降级）→ `bot.Send(ParseMode=HTML)`；HTML 失败降级为原始 markdown 纯文本重发。
+- 多平台扩展：实现 `sender.Sender` 接口（`Send(md)/Name()`）+ `sender.Register` 即可（如将来的 lark），tool 层（`send_message` 的 `platform` 参数）无需改动。与图源的注册表模式一脉相承，但 sender 在 `main.go` 运行期注册（依赖 bot 实例），不用 `init()` 自注册。
 
 ## 约定
 
