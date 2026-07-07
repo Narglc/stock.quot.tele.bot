@@ -1,12 +1,15 @@
 module github.com/narglc/stock.quot.tele.bot
 
-go 1.21.3
+go 1.22
+
+toolchain go1.24.11
 
 require (
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/sirupsen/logrus v1.6.0
 	github.com/spf13/viper v1.13.0
+	github.com/yuin/goldmark v1.8.2
 	gopkg.in/telebot.v3 v3.3.8
 )
 
