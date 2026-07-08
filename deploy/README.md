@@ -14,7 +14,53 @@ claude.ai web ──OAuth(Google)+DCR──▶ mcp-auth-proxy  (:443, ACME TLS)
 
 > 只用 Claude Code / API 的话**不需要本方案**：直接 `.mcp.json` 配 `headers: Authorization Bearer` 即可（见项目根 README）。本目录仅为「要接 claude.ai 网页版」而设。
 
-## 目录与账号
+---
+
+## 方式 A：Docker Compose（推荐，对系统侵入最小）
+
+只需 Docker + Compose 插件。三个容器：`redis` + `bot`（内网 8081，不对宿主/公网开放）+ `mcp-proxy`（对外 80/443、自动 ACME）。
+
+```bash
+cd deploy
+cp bot.env.example bot.env
+cp proxy.env.example proxy.env
+```
+- 编辑 `bot.env`：填 `TOKEN` / `MCP_TARGET_CHAT_ID` / `MCP_JWT_SECRET`
+  （`RDB_URL`、`MCP_ADDR` 由 compose 固定注入，`bot.env` 里的值会被忽略）
+- 编辑 `proxy.env`：填 `EXTERNAL_URL` / `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_ALLOWED_USERS`
+  （`DATA_PATH` 由 compose 固定为 `/data`；`PROXY_BEARER_TOKEN` 见下）
+
+**① 配 Google OAuth**：同下方[方式 B 第 3 步](#3-配-google-oauth)，回调填 `https://<你的域名>/.auth/google/callback`。
+
+**② 签发注入用 JWT**（填进 `proxy.env` 的 `PROXY_BEARER_TOKEN`）：
+```bash
+docker compose run --rm -e MCP_JWT_SECRET=<与bot.env相同> bot \
+  /app/bot -mktoken <你的chat_id> | tail -1
+```
+
+**③ DNS/防火墙**：域名 A 记录指向本机，放通入站 80 / 443。
+
+**④ 启动**：
+```bash
+docker compose up -d --build
+docker compose logs -f mcp-proxy      # 看 ACME 签证书、OAuth
+```
+
+自检：
+```bash
+docker compose ps
+curl -s https://<你的域名>/.well-known/oauth-authorization-server | head
+```
+
+**⑤ 接入 claude.ai**：同下方[第 7 步](#7-接入-claudeai-网页版)，连接器 URL = `https://<你的域名>/mcp`。
+
+> 更新 bot 代码：`docker compose up -d --build bot`。数据（redis、证书 / OAuth 动态注册状态）在命名卷 `redis-data` / `proxy-data`，`docker compose down` 不加 `-v` 不会丢。
+
+---
+
+## 方式 B：systemd（裸机）
+
+### 目录与账号
 
 ```bash
 sudo useradd -r -s /usr/sbin/nologin gohome
