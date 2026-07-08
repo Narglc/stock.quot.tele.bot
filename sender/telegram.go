@@ -1,6 +1,7 @@
 package sender
 
 import (
+	"fmt"
 	"strconv"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
@@ -13,21 +14,25 @@ type telebotAPI interface {
 	Send(to tele.Recipient, what interface{}, opts ...interface{}) (*tele.Message, error)
 }
 
-// TelegramSender 把 markdown 转 HTML 后发给固定 target；HTML 失败降级纯文本。
+// TelegramSender 把 markdown 转 HTML 后发给指定 chat；HTML 失败降级纯文本。
+// 目标 chat 由每次调用的 recipient 决定（来自鉴权 JWT 的 chat_id 或配置默认目标）。
 type TelegramSender struct {
-	bot    telebotAPI
-	target int64
+	bot telebotAPI
 }
 
-// NewTelegramSender 构造一个 TelegramSender，向固定 target chat 发送消息。
-func NewTelegramSender(bot telebotAPI, target int64) *TelegramSender {
-	return &TelegramSender{bot: bot, target: target}
+// NewTelegramSender 构造一个 TelegramSender。
+func NewTelegramSender(bot telebotAPI) *TelegramSender {
+	return &TelegramSender{bot: bot}
 }
 
 func (t *TelegramSender) Name() string { return "telegram" }
 
-func (t *TelegramSender) Send(md string) (string, error) {
-	to := tele.ChatID(t.target)
+func (t *TelegramSender) Send(md, recipient string) (string, error) {
+	chatID, err := strconv.ParseInt(recipient, 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("invalid telegram recipient %q: %w", recipient, err)
+	}
+	to := tele.ChatID(chatID)
 
 	html, cerr := tgmd.Convert(md)
 	if cerr == nil {

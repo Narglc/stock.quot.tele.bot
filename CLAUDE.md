@@ -25,7 +25,7 @@ go mod tidy
 - 本地调试用 `.vscode/launch.json`，其中已内联 `TOKEN` / `RDB_URL` 环境变量。
 - 单元测试：`tgmd` / `sender` / `mcpserver` / `config` 有测试（`go test ./...`）；无 lint 配置。
 - **需 Go ≥ 1.25.5**（`mark3labs/mcp-go` 的最低要求，`go.mod` 已声明）；`GOTOOLCHAIN=auto`（默认）会自动切换/下载对应工具链。
-- 配置统一走 viper（`config/config.go`）：**配置文件 `config/config.yaml` 为主，敏感项（`telegram.token`、`redis.url`）留空由环境变量 `TOKEN` / `RDB_URL` 覆盖**（`viper.AutomaticEnv` + 显式 `BindEnv`）。MCP 相关：`mcp.target_chat_id`（`MCP_TARGET_CHAT_ID`）、`mcp.addr`（`MCP_ADDR`，默认 `:8081`）。`main.go:validateConfig` 校验合并后的 token / redis url 非空。
+- 配置统一走 viper（`config/config.go`）：**配置文件 `config/config.yaml` 为主，敏感项（`telegram.token`、`redis.url`、`mcp.jwt_secret`）留空由环境变量 `TOKEN` / `RDB_URL` / `MCP_JWT_SECRET` 覆盖**（`viper.AutomaticEnv` + 显式 `BindEnv`）。MCP 相关：`mcp.target_chat_id`（`MCP_TARGET_CHAT_ID`）、`mcp.addr`（`MCP_ADDR`，默认 `127.0.0.1:8081` 回环）、`mcp.jwt_secret`（`MCP_JWT_SECRET`）。`main.go:validateConfig` 校验合并后的 token / redis url 非空。`main.go` 起始调 `flag.Parse()`（支持 `-f` 与 `-mktoken`）。
 
 ## 架构要点
 
@@ -57,10 +57,13 @@ go mod tidy
 自封装的 logrus 包装层，包级函数 `log.Infof` 等直接可用（`GetLogger()` 通过 `runtime.Caller` 注入调用处 `__src`）。支持 lumberjack 滚动切割，由 `config.yaml` 的 logger 段驱动。全项目统一以 `log "github.com/narglc/stock.quot.tele.bot/pkg/logger"` 别名导入。
 
 ### MCP 发消息服务（mcpserver/ + sender/ + tgmd/）
-供自己的 agent 通过 MCP 发消息。`config.MCP.TargetChatID != 0` 时，`main.go` 构造 `TelegramSender` 注册进 `sender` 注册表并在 goroutine 启动 `mcpserver.Serve`（`mark3labs/mcp-go`，Streamable HTTP，默认 `:8081/mcp`）。
+供自己的 agent 通过 MCP 发消息。`config.MCP.TargetChatID != 0` 时，`main.go` 构造 `TelegramSender` 注册进 `sender` 注册表并在 goroutine 启动 `mcpserver.Serve`（`mark3labs/mcp-go`，Streamable HTTP，默认 `127.0.0.1:8081/mcp`）。
 - tool：`send_message(platform="telegram", text)`，`text` 为标准 markdown。
 - 发送链路：`tgmd.Convert`（`goldmark` 解析 AST → 只输出 Telegram 支持的 HTML 标签子集，标题/列表/表格降级）→ `bot.Send(ParseMode=HTML)`；HTML 失败降级为原始 markdown 纯文本重发。
-- 多平台扩展：实现 `sender.Sender` 接口（`Send(md)/Name()`）+ `sender.Register` 即可（如将来的 lark），tool 层（`send_message` 的 `platform` 参数）无需改动。与图源的注册表模式一脉相承，但 sender 在 `main.go` 运行期注册（依赖 bot 实例），不用 `init()` 自注册。
+- **鉴权（`mcpserver/jwtauth.go`）**：`mcp.jwt_secret`（`MCP_JWT_SECRET`）非空则启用 JWT Bearer 鉴权，中间件校验 HS256 签名（显式拒 `alg=none`）+ `exp`；为空则免鉴权（仅回环用，向后兼容）。
+- **发送目标**：鉴权开启时目标 = JWT 的 `sub`(chat_id)，经 request context 透传到 handler；免鉴权时回落 `MCP_TARGET_CHAT_ID`。`Sender.Send(md, recipient)` 的 recipient 即目标（Telegram 为 chat_id 字符串）。
+- **签发 token**：`MCP_JWT_SECRET=xxx go run main.go -mktoken <chat_id>`（`mcpserver.SignToken`），打印后退出、不启动 bot。
+- 多平台扩展：实现 `sender.Sender` 接口（`Send(md, recipient)/Name()`）+ `sender.Register` 即可（如将来的 lark），tool 层无需改动。与图源的注册表模式一脉相承，但 sender 在 `main.go` 运行期注册（依赖 bot 实例），不用 `init()` 自注册。
 
 ## 约定
 

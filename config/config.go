@@ -20,6 +20,8 @@ type RedisConfig struct {
 type MCPConfig struct {
 	Addr         string `mapstructure:"addr"`
 	TargetChatID int64  `mapstructure:"target_chat_id"`
+	// JWTSecret 为空时 MCP 不启用鉴权（仅回环访问）；非空时要求请求带合法 JWT Bearer。
+	JWTSecret string `mapstructure:"jwt_secret"`
 }
 
 type Config struct {
@@ -49,6 +51,7 @@ func InitConfig(configPath string) (*Config, bool) {
 	_ = viper.BindEnv("redis.url", "RDB_URL")
 	_ = viper.BindEnv("mcp.target_chat_id", "MCP_TARGET_CHAT_ID")
 	_ = viper.BindEnv("mcp.addr", "MCP_ADDR")
+	_ = viper.BindEnv("mcp.jwt_secret", "MCP_JWT_SECRET")
 
 	if err := viper.ReadInConfig(); err != nil {
 		fmt.Printf("config file %s read failed. %v\n", configPath, err)

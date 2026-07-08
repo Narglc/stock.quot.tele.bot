@@ -4,7 +4,8 @@ redis:
   url: ""              # 留空，用 RDB_URL 环境变量覆盖
 mcp:
   addr: "127.0.0.1:8081"
-  target_chat_id: 0    # 设为自己的 chat_id 才启用 MCP（0=不启用）
+  target_chat_id: 0    # 设为自己的 chat_id 才启用 MCP（0=不启用）；也是无鉴权时的默认发送目标
+  jwt_secret: ""       # 留空=不鉴权（仅回环用）；非空则要求 JWT Bearer，用 MCP_JWT_SECRET 覆盖
 logger:
   level: "debug"
   logPath: "logs/tele.bog.log"

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"time"
 
@@ -16,7 +17,11 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
-var configPath = flag.String("f", "./config/config.yaml", "config file")
+var (
+	configPath = flag.String("f", "./config/config.yaml", "config file")
+	// -mktoken <chat_id>：用 MCP_JWT_SECRET 签发一个该 chat_id 的 MCP JWT 后退出，不启动 bot。
+	mkToken = flag.Int64("mktoken", 0, "签发一个 chat_id 的 MCP JWT 并退出")
+)
 
 func validateConfig(cfg *config.Config) error {
 	if cfg.Telegram.Token == "" {
@@ -29,9 +34,21 @@ func validateConfig(cfg *config.Config) error {
 }
 
 func main() {
+	flag.Parse()
+
 	appConfig, cfg_succ := config.InitConfig(*configPath)
 	if !cfg_succ {
 		panic("config init fail.")
+	}
+
+	// -mktoken：仅签发 JWT 后退出（不需要 TOKEN/RDB_URL，故在校验前处理）
+	if *mkToken != 0 {
+		tok, err := mcpserver.SignToken(appConfig.MCP.JWTSecret, *mkToken)
+		if err != nil {
+			log.Fatalf("签发 token 失败: %v", err)
+		}
+		fmt.Println(tok)
+		return
 	}
 
 	if err := validateConfig(appConfig); err != nil {
@@ -66,10 +83,11 @@ func main() {
 	schedule.LoadGroups()
 
 	// 配置了 target 才启用 MCP：构造 telegram 发送器、注册、起 HTTP 服务
+	// 发送目标：鉴权开启时取 JWT 的 chat_id，否则回落 TargetChatID
 	if appConfig.MCP.TargetChatID != 0 {
-		sender.Register(sender.NewTelegramSender(b, appConfig.MCP.TargetChatID))
+		sender.Register(sender.NewTelegramSender(b))
 		go func() {
-			if err := mcpserver.Serve(appConfig.MCP.Addr); err != nil {
+			if err := mcpserver.Serve(appConfig.MCP.Addr, appConfig.MCP.JWTSecret, appConfig.MCP.TargetChatID); err != nil {
 				logger.Errorf("MCP server 退出: %v", err)
 			}
 		}()

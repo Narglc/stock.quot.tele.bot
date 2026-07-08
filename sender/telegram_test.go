@@ -33,9 +33,9 @@ func (f *fakeBot) Send(to tele.Recipient, what interface{}, opts ...interface{})
 
 func TestTelegramSend_HTML(t *testing.T) {
 	fb := &fakeBot{}
-	s := NewTelegramSender(fb, 100)
+	s := NewTelegramSender(fb)
 
-	id, err := s.Send("**hi**")
+	id, err := s.Send("**hi**", "100")
 	if err != nil {
 		t.Fatalf("Send err: %v", err)
 	}
@@ -52,9 +52,9 @@ func TestTelegramSend_HTML(t *testing.T) {
 
 func TestTelegramSend_Downgrade(t *testing.T) {
 	fb := &fakeBot{failHTML: true}
-	s := NewTelegramSender(fb, 100)
+	s := NewTelegramSender(fb)
 
-	id, err := s.Send("**hi**")
+	id, err := s.Send("**hi**", "100")
 	if err != nil {
 		t.Fatalf("Send err: %v", err)
 	}
@@ -69,6 +69,18 @@ func TestTelegramSend_Downgrade(t *testing.T) {
 	}
 	if fb.calls[1].what != "**hi**" {
 		t.Errorf("fallback what = %q, want raw markdown **hi**", fb.calls[1].what)
+	}
+}
+
+func TestTelegramSend_InvalidRecipient(t *testing.T) {
+	fb := &fakeBot{}
+	s := NewTelegramSender(fb)
+
+	if _, err := s.Send("hi", "not-a-number"); err == nil {
+		t.Error("non-numeric recipient should error")
+	}
+	if len(fb.calls) != 0 {
+		t.Errorf("should not call bot.Send on invalid recipient, got %d calls", len(fb.calls))
 	}
 }
 
