@@ -1,0 +1,16 @@
+[Unit]
+Description=gohome Telegram bot + MCP (loopback only)
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gohome
+WorkingDirectory=/opt/gohome
+EnvironmentFile=/etc/gohome/bot.env
+ExecStart=/opt/gohome/bot -f /opt/gohome/config/config.yaml
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
