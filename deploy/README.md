@@ -13,6 +13,8 @@ claude.ai web ──OAuth(Google)+DCR──▶ mcp-auth-proxy  (:443, ACME TLS)
 ```
 
 > 只用 Claude Code / API 的话**不需要本方案**：直接 `.mcp.json` 配 `headers: Authorization Bearer` 即可（见项目根 README）。本目录仅为「要接 claude.ai 网页版」而设。
+>
+> 若要在**同一 443 端口**上同时跑「MCP + 静态网页 + 其他服务（如 v2ray）」，用 Caddy 前置方案，见 [`caddy-guide.md`](./caddy-guide.md)（含路由分流、宿主/容器 Caddy 区别、502 等排错）。
 
 ---
 
