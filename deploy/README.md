@@ -150,7 +150,9 @@ Settings → Connectors →「+」→ **Add custom connector** →
 
 保存后点连接，会跳 Google 登录（用 `GOOGLE_ALLOWED_USERS` 里的账号），授权完成即接入。之后就能让 Claude 调 `send_message` 给你的 Telegram 发消息。
 
-> 若连接器报找不到 MCP 端点，确认代理暴露的路径与上游一致（上游 `http://127.0.0.1:8081/mcp` → 对外 `https://mcp.example.com/mcp`），必要时看 `journalctl -u gohome-mcp-proxy` 的实际路由。
+> **上游地址填 bot 根地址 `http://127.0.0.1:8081`（docker 内为 `http://bot:8081`），不要带 `/mcp`**：
+> 代理会把外部请求路径原样拼到上游后面，外部 `/mcp` + 上游根 → `http://bot:8081/mcp`（正确）；
+> 若上游写成 `.../mcp`，会变成 `/mcp/mcp` → bot 返回 404，claude.ai 报「authorized 但找不到 MCP server」。
 
 ## 安全要点
 

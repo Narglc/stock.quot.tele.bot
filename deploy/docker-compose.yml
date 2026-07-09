@@ -31,7 +31,9 @@ services:
       - ./proxy.env          # EXTERNAL_URL / GOOGLE_* / PROXY_BEARER_TOKEN
     environment:
       DATA_PATH: /data       # 覆盖 proxy.env，落到下面的 volume
-    command: ["--", "http://bot:8081/mcp"]
+    # 上游填 bot 的根地址（不带 /mcp）：代理会把外部请求路径 /mcp 拼到上游后，
+    # 得到 http://bot:8081/mcp；若上游写成 .../mcp 会变成 /mcp/mcp → 404
+    command: ["--", "http://bot:8081"]
     ports:
       - "80:80"              # ACME HTTP-01 验证
       - "443:443"            # 对外 HTTPS
