@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"time"
+	// 内嵌 IANA 时区库：保证无系统 tzdata 的精简容器也能 LoadLocation("Asia/Shanghai")
+	_ "time/tzdata"
 
 	"github.com/narglc/stock.quot.tele.bot/config"
 	"github.com/narglc/stock.quot.tele.bot/dao"
@@ -73,6 +75,7 @@ func main() {
 	b.Handle("/register", handler.Register)
 	b.Handle("/wakeup", handler.Wakeup)
 	b.Handle("/sticker", handler.Sticker)
+	b.Handle("/price", handler.Price)
 
 	b.Handle(tele.OnText, handler.OnText)
 	b.Handle(tele.OnSticker, handler.OnSticker)
@@ -107,6 +110,7 @@ func main() {
 		{Text: "/register", Description: "下班提醒"},
 		{Text: "/wakeup", Description: "提神醒脑"},
 		{Text: "/sticker", Description: "精选表情包"},
+		{Text: "/price", Description: "查行情（可加币种，如 /price btc eth）"},
 	}
 
 	err = b.SetCommands(commands)

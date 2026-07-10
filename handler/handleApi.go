@@ -63,14 +63,14 @@ func Register(c tele.Context) error {
 	log.Infof("sender:[%d - %s] chatinfo:[%+v], text:%+v\n", user.ID, user.FirstName, chatinfo, text)
 
 	var err error
-	if _, ok := schedule.GroupMap[chat.ID]; ok {
+	if schedule.IsRegistered(chat.ID) {
 		_, err = c.Bot().Send(chat, utils.GetRandomResponse())
 	} else {
 		_, err = c.Bot().Send(chat, "大师已就位！敬请期待！")
 		if err == nil {
 			schedule.RegisterGroup(chat.ID, chatinfo)
 		}
-		log.Infof("register GroupList: %+v\n", schedule.GroupMap)
+		log.Infof("register GroupList count: %d\n", schedule.GroupCount())
 	}
 
 	return err

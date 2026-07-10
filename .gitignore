@@ -23,6 +23,11 @@
 # Go workspace file
 go.work
 
+# 编辑器临时/交换文件
+*.swp
+*.swo
+*~
+
 
 # logs
 logs/

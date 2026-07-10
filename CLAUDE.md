@@ -36,6 +36,7 @@ go mod tidy
 - `/register` — 把当前 chat 登记进 `schedule.GroupMap`，之后才会收到定时提醒。
 - `/wakeup [源]` — 从随机图源拉一张图发出；`payload` 为空时随机选源。
 - `/sticker` — 从 Redis 随机取一张收藏的表情包。
+- `/price [币种...]` — 即时查行情（`handler/price.go`）。不带参查默认 BTC/ETH，带参如 `/price btc eth sol` 查指定币种（`stocks.symbolToCoin` 里的符号，大小写不敏感）。与整点播报共用 `stocks` 底层。
 - `OnSticker` / `OnPhoto` — 用户发来的表情包/图片会被"收藏"进 Redis（当作贡品）。
 
 ### 随机图源：注册表 + 单例 + init 自注册（domain/randompic/）
@@ -47,11 +48,15 @@ go mod tidy
 
 同时注意：`handler/handleApi.go:getRandomPicSrc()` 里硬编码了可随机选中的图源名单（`lolimi`/`lolicon`/`sexnyan`），新增图源若要参与随机需同步这里。现有实现：`lolicon.go`、`lolimi.go`、`sexnyan.go`。
 
-### 定时提醒（schedule/）
-`sendGoHomeNotifications` 是一个常驻 goroutine：每 30 秒轮询一次系统时间，工作日（周一至五）匹配 `TaskList` 中的 `HH:MM` 就向 `GroupMap` 内所有群广播消息，命中后 sleep 1 分钟防重复。**注意**：比较的是 `time.Now()` 本地时区，且 `TaskList` 里的时间看起来是按 UTC/服务器时区写的（如"起床"= `00:00`），改动提醒时间要确认运行环境时区。`GroupMap` 是内存态，进程重启后需重新 `/register`。
+### 定时提醒 + 行情播报（schedule/）
+`ScheduleTask` 用 `robfig/cron/v3` 统一调度，时区固定为**东八区 `Asia/Shanghai`**（`schedule.go:beijingLoc`；`main.go` 内嵌 `time/tzdata` 保证精简容器也能加载）：
+- 工作日提醒：`TaskList`（`gohome.go`）里每个 `HH:MM` 注册一条 cron（`M H * * 1-5`），触发时经 `broadcastToGroups` 向 `GroupMap` 内所有群广播。`TaskList` 的时间即**东八区挂钟时间**（如"起床"= `08:00`），改时间直接按北京时间填，无需再折算时区。
+- 行情播报：`0 * * * *` 每小时整点调 `broadcastCrypto`（`crypto.go`），并在启动时 `go broadcastCrypto` 立即播报一次。数据来自 CoinGecko `/coins/markets`（价 + 1h/24h/7d/30d 涨跌 + 24h 成交额 + 距 ATH + 市值排名，见 `stocks/crypto.go`），并附恐惧贪婪指数（`stocks/sentiment.go`，alternative.me，best-effort 失败则省略该行）。`/price` 与播报共用 `stocks.FormatCryptoMessage`。
+- 发送失败且 `IsBotEvicted` 判定 bot 已被移出时自动 `UnregisterGroup`（提醒与行情共用 `broadcastToGroups`）。
+- 群列表是内存态（`gohome.go:groupMap`，进程重启后由 `LoadGroups()` 从 Redis 恢复），由 `groupMu sync.RWMutex` 保护，只经导出的线程安全函数访问：`RegisterGroup`/`UnregisterGroup`/`IsRegistered`/`GroupCount`/`SnapshotGroupIDs`。广播先 `SnapshotGroupIDs()` 取 id 快照再逐个发送，避免持锁做网络 I/O、以及遍历中调 `UnregisterGroup` 自死锁（并发安全由 `schedule/group_test.go` 的 `-race` 压测覆盖）。
 
 ### 数据层（dao/rds.go）
-基于 `go-redis/redis` v6，全局单例 `rdb`。表情包和图片分别存 Redis Set（`tg:gohome:stickers` / `tg:gohome:pics`），用 `SAdd` 收藏、`SRandMember` 随机取。`DefaultSticker` 是取不到时的兜底 fileID。
+基于 `redis/go-redis/v9`，全局单例 `rdb`；每次操作走 `opCtx()` 带 5s 超时的 context。`InitRdb` 解析 URL 失败或启动 `Ping` 不通直接 panic（fail-fast）。表情包和图片分别存 Redis Set（`tg:gohome:stickers` / `tg:gohome:pics`），用 `SAdd` 收藏、`SRandMember` 随机取；已注册群存 Hash（`tg:gohome:groups`）。`DefaultSticker` 是取不到时的兜底 fileID。
 
 ### 日志（pkg/logger/logger.go）
 自封装的 logrus 包装层，包级函数 `log.Infof` 等直接可用（`GetLogger()` 通过 `runtime.Caller` 注入调用处 `__src`）。支持 lumberjack 滚动切割，由 `config.yaml` 的 logger 段驱动。全项目统一以 `log "github.com/narglc/stock.quot.tele.bot/pkg/logger"` 别名导入。
