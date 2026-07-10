@@ -6,8 +6,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]   # AOF：每次写都落盘，重启不丢注册群
     volumes:
-      - redis-data:/data
+      - ./data/redis:/data     # 映射到本地目录，可直接查看/备份
 
   bot:
     build:
@@ -20,6 +21,8 @@ services:
       # docker 内网寻址与监听（这几项由 compose 固定，勿在 bot.env 里改）
       RDB_URL: redis://redis:6379
       MCP_ADDR: 0.0.0.0:8081  # 仅 docker 内网可达，不 publish 到宿主 = 等价回环
+    volumes:
+      - ./logs:/app/logs       # bot 日志（lumberjack 滚动文件）落到本地
     depends_on:
       - redis
     # 注意：不要给 bot 加 ports，8081 只暴露给 proxy，不对宿主/公网开放
@@ -43,5 +46,4 @@ services:
       - bot
 
 volumes:
-  redis-data:
   proxy-data:

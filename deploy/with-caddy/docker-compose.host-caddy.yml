@@ -6,7 +6,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    volumes: [redis-data:/data]
+    command: ["redis-server", "--appendonly", "yes"]   # AOF 持久化
+    volumes:
+      - ./data/redis:/data           # 映射到本地目录
 
   bot:
     build:
@@ -17,6 +19,8 @@ services:
     environment:
       RDB_URL: redis://redis:6379
       MCP_ADDR: 0.0.0.0:8081          # 仅内网
+    volumes:
+      - ./logs:/app/logs             # bot 日志落本地
     depends_on: [redis]
 
   mcp-proxy:
@@ -32,5 +36,4 @@ services:
     depends_on: [bot]
 
 volumes:
-  redis-data:
   proxy-data:

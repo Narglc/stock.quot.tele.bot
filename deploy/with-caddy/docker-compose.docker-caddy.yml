@@ -7,7 +7,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    volumes: [redis-data:/data]
+    command: ["redis-server", "--appendonly", "yes"]   # AOF 持久化
+    volumes:
+      - ./data/redis:/data           # 映射到本地目录
 
   bot:
     build:
@@ -18,6 +20,8 @@ services:
     environment:
       RDB_URL: redis://redis:6379
       MCP_ADDR: 0.0.0.0:8081
+    volumes:
+      - ./logs:/app/logs             # bot 日志落本地
     depends_on: [redis]
 
   mcp-proxy:
@@ -39,14 +43,12 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./site:/usr/share/nginx/html:ro   # 静态网页
-      - caddy-data:/data
+      - ./logs/caddy:/var/log/caddy       # caddy 访问日志落本地
+      - caddy-data:/data                  # 证书/ACME 状态（named volume 即可）
       - caddy-config:/config
-      - caddy-logs:/var/log/caddy
     depends_on: [mcp-proxy]
 
 volumes:
-  redis-data:
   proxy-data:
   caddy-data:
   caddy-config:
-  caddy-logs:

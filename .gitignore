@@ -31,3 +31,7 @@ logs/
 # 部署密钥文件（保留 .example）
 deploy/**/*.env
 !deploy/**/*.env.example
+
+# 部署运行时目录（redis 数据 / 日志）
+deploy/**/data/
+deploy/**/logs/
