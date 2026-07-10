@@ -56,7 +56,18 @@ curl -s https://<你的域名>/.well-known/oauth-authorization-server | head
 
 **⑤ 接入 claude.ai**：同下方[第 7 步](#7-接入-claudeai-网页版)，连接器 URL = `https://<你的域名>/mcp`。
 
-> 更新 bot 代码：`docker compose up -d --build bot`。数据（redis、证书 / OAuth 动态注册状态）在命名卷 `redis-data` / `proxy-data`，`docker compose down` 不加 `-v` 不会丢。
+> 更新 bot 代码：`docker compose up -d --build bot`。
+
+### 数据与日志（运行时目录，已 gitignore）
+
+首次 `up` 会在 compose 同级自动创建：
+
+| 目录 | 内容 | 说明 |
+|---|---|---|
+| `./data/redis/` | redis 数据（AOF `appendonly*` + `dump.rdb`） | bind mount，注册群等落这里，重启不丢；可直接备份 |
+| `./logs/` | bot 日志（lumberjack 滚动：`tele.bog.log` + 切割备份） | `tail -f logs/tele.bog.log` 查看 |
+
+`mcp-proxy` 的证书 / OAuth 动态注册状态仍在命名卷 `proxy-data`（`docker compose down` 不加 `-v` 不会丢）。备份 redis 直接拷 `./data/redis/` 即可。
 
 ---
 

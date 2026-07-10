@@ -42,6 +42,18 @@ docker compose -f docker-compose.docker-caddy.yml logs -f caddy   # 看 ACME 签
 
 ---
 
+## 数据与日志（运行时目录，已 gitignore）
+
+首次 `up` 会在 compose 同级自动创建：
+
+| 目录 | 内容 |
+|---|---|
+| `./data/redis/` | redis 数据（AOF + RDB）；bind mount，重启不丢注册群，可直接备份 |
+| `./logs/` | bot 日志（lumberjack 滚动文件 `tele.bog.log`） |
+| `./logs/caddy/` | 仅 docker-caddy 版：caddy 访问日志 |
+
+`mcp-proxy` 的证书/OAuth 状态在命名卷 `proxy-data`；docker-caddy 版的证书在 `caddy-data`。备份 redis 拷 `./data/redis/` 即可。
+
 ## 验证
 
 ```bash
