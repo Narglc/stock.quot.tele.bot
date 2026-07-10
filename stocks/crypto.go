@@ -228,6 +228,9 @@ func formatCompact(v float64) string {
 	}
 }
 
+// FormatPrice 是 formatPrice 的导出版，供其它包（如 inline 结果）复用统一的价格排版。
+func FormatPrice(v float64) string { return formatPrice(v) }
+
 // formatPrice 按千分位格式化价格。价格越小保留的小数位越多，避免低价币显示成 0.00。
 func formatPrice(v float64) string {
 	decimals := 2

@@ -38,6 +38,7 @@ go mod tidy
 - `/sticker` — 从 Redis 随机取一张收藏的表情包。
 - `/price [币种...]` — 即时查行情（`handler/price.go`）。不带参查默认 BTC/ETH，带参如 `/price btc eth sol` 查指定币种（`stocks.symbolToCoin` 里的符号，大小写不敏感）。与整点播报共用 `stocks` 底层。
 - `OnSticker` / `OnPhoto` — 用户发来的表情包/图片会被"收藏"进 Redis（当作贡品）。
+- `OnQuery`（inline 模式，`handler/inline.go`）— 在**任意聊天**输入 `@bot [币种...]` 查行情，返回「全部」+ 每币种各一条 `ArticleResult`，点选即把该行情发到当前聊天。与 `/price` 共用 `stocks` 底层。**前置**：需在 @BotFather 用 `/setinline` 为 bot 开启 inline 模式，否则 `@bot` 不出结果。
 
 ### 随机图源：注册表 + 单例 + init 自注册（domain/randompic/）
 这是本项目最重要的扩展模式。新增一个图源时：

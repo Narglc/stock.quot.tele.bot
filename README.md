@@ -4,7 +4,7 @@
 
 - **群聊定时提醒**：工作日起床/午饭/下班等（`schedule/`）
 - **随机图片 / 表情包**：`/wakeup` 拉随机图、`/sticker` 随机表情，用户发来的图/表情自动收藏进 Redis
-- **行情播报 + `/price` 即时查询**：CoinGecko `/coins/markets` 数据（价、1h/24h/7d/30d 涨跌、24h 成交额、距 ATH、市值排名）+ 恐惧贪婪指数（alternative.me）。每小时整点向已注册群播报，`/price [币种...]` 随时查（`stocks/` + `schedule/crypto.go` + `handler/price.go`）
+- **行情播报 + `/price` 即时查询 + inline 查询**：CoinGecko `/coins/markets` 数据（价、1h/24h/7d/30d 涨跌、24h 成交额、距 ATH、市值排名）+ 恐惧贪婪指数（alternative.me）。每小时整点向已注册群播报，`/price [币种...]` 随时查；inline 模式下在任意聊天输入 `@bot [币种...]` 也能查（`stocks/` + `schedule/crypto.go` + `handler/price.go` + `handler/inline.go`）。inline 需在 @BotFather `/setinline` 开启。
 - **MCP 发消息服务**：自己的 agent 可通过 MCP `send_message` 工具发 markdown 消息到 Telegram（`mcpserver/`）
 - 已注册群持久化到 Redis，重启自动恢复；bot 被踢自动注销
 

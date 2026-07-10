@@ -81,6 +81,7 @@ func main() {
 	b.Handle(tele.OnSticker, handler.OnSticker)
 	b.Handle(tele.OnPhoto, handler.OnPhoto)
 	b.Handle(tele.OnMyChatMember, handler.OnMyChatMember)
+	b.Handle(tele.OnQuery, handler.InlineQuery) // inline 行情查询（需 @BotFather /setinline 开启）
 
 	// 从 Redis 恢复已注册群，再启动定时任务（否则重启后 GroupMap 为空、无人收播报）
 	schedule.LoadGroups()
