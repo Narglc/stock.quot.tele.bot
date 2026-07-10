@@ -1,0 +1,36 @@
+# 宿主 Caddy 版：Caddy 是系统服务（/etc/caddy），本 compose 只跑 redis+bot+mcp-proxy。
+# mcp-proxy 暴露到宿主回环 127.0.0.1:8080，供宿主 Caddy 反代（见 narglc.eu.org.conf）。
+# 用法：docker compose -f docker-compose.host-caddy.yml up -d --build
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes: [redis-data:/data]
+
+  bot:
+    build:
+      context: ../..                 # 仓库根
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: [./bot.env]
+    environment:
+      RDB_URL: redis://redis:6379
+      MCP_ADDR: 0.0.0.0:8081          # 仅内网
+    depends_on: [redis]
+
+  mcp-proxy:
+    image: ghcr.io/sigbit/mcp-auth-proxy:latest
+    restart: unless-stopped
+    env_file: [./proxy.env]          # 含 NO_AUTO_TLS / LISTEN=:8080 / TRUSTED_PROXIES=127.0.0.1/32
+    environment:
+      DATA_PATH: /data
+    command: ["--", "http://bot:8081"]   # 上游 bot 根地址（不带 /mcp）
+    ports:
+      - "127.0.0.1:8080:8080"        # ★ 只对宿主回环开，供宿主 Caddy 反代
+    volumes: [proxy-data:/data]
+    depends_on: [bot]
+
+volumes:
+  redis-data:
+  proxy-data:

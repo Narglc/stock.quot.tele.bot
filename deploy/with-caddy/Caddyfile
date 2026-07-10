@@ -1,0 +1,19 @@
+# Docker Caddy 版的 Caddyfile（配合 docker-compose.docker-caddy.yml）
+# 上游是同 compose 网络里的 mcp-proxy 服务名。
+
+narglc.eu.org {
+    log {
+        output file /var/log/caddy/narglc.eu.org/access.log
+    }
+
+    @mcp path /mcp /mcp/* /.well-known/* /.idp/* /.auth/* /healthz
+    handle @mcp {
+        reverse_proxy mcp-proxy:8080
+    }
+
+    handle {
+        root * /usr/share/nginx/html
+        encode gzip
+        file_server
+    }
+}

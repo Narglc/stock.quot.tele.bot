@@ -27,3 +27,7 @@ go.work
 # logs
 logs/
 .vscode/*
+
+# 部署密钥文件（保留 .example）
+deploy/**/*.env
+!deploy/**/*.env.example
