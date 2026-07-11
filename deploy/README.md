@@ -73,6 +73,18 @@ curl -s https://<你的域名>/.well-known/oauth-authorization-server | head
 
 ## 方式 B：systemd（裸机）
 
+### 前置：安装 redis
+
+裸机上 bot 直接连本机 redis（`bot.env` 的 `RDB_URL=redis://127.0.0.1:6379`），需先装好：
+
+```bash
+sudo apt install -y redis-server
+sudo systemctl enable --now redis-server
+# 建议开 AOF（重启不丢注册群，与 docker 版一致）：
+sudo sed -i 's/^appendonly no/appendonly yes/' /etc/redis/redis.conf
+sudo systemctl restart redis-server
+```
+
 ### 目录与账号
 
 ```bash
@@ -146,6 +158,17 @@ sudo systemctl enable --now gohome-bot gohome-mcp-proxy
 journalctl -u gohome-bot -f
 journalctl -u gohome-mcp-proxy -f
 ```
+
+> **`systemctl enable --now` 做了什么**：一条命令干两件事——`enable` 把服务注册成**开机自启**（挂到 `.service` 的 `[Install] WantedBy=multi-user.target`，机器重启后自动拉起）；`--now` **立刻也启动一次**（等于顺带 `systemctl start`）。
+>
+> 交给 systemd 托管（而非 `./bot &`）的好处，`.service` 里已配好：
+> - **开机自启**：服务器重启自动回来；
+> - **崩溃自愈**：`Restart=on-failure` + `RestartSec=3`，进程挂了 3 秒后自动重启；
+> - **后台常驻**：脱离登录会话，关掉 SSH 也照跑；
+> - **统一日志**：`journalctl -u gohome-bot -f`，带时间戳、可按服务筛；
+> - **降权 + 依赖顺序**：`User=gohome` 用非特权账号跑，`After=network-online.target redis-server.service` 等网络和 redis 就绪再启动。
+>
+> 常用运维：`systemctl status/restart/stop gohome-bot`；`systemctl disable gohome-bot` 取消开机自启（不影响当前运行）。这与 docker 版的 `restart: unless-stopped` 是同类保障（自动重启 + 随 docker 开机拉起），只是一个由 systemd 管裸机进程、一个由 docker 管容器。
 
 自检：
 ```bash
