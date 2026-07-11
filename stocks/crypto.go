@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
@@ -63,8 +64,15 @@ type CryptoQuote struct {
 	Change7d      float64 // 7d 涨跌幅
 	Change30d     float64 // 30d 涨跌幅
 	Volume24h     float64 // 24h 成交额（USD）
+	High24h       float64 // 24h 最高价
+	Low24h        float64 // 24h 最低价
+	MarketCap     float64 // 市值（USD）
 	ATHChangePct  float64 // 距历史最高点涨跌幅（通常为负，越接近 0 越接近历史高点）
 	MarketCapRank int     // 市值排名
+
+	// 衍生品指标（Binance 永续，best-effort；0 = 未取到，展示时省略）。
+	OpenInterestUSD float64 // 未平仓合约名义价值（USD）
+	LongShortRatio  float64 // 全市场多空账户比，>1 偏多
 }
 
 // coingeckoMarket 对应 /coins/markets 接口的单条返回（只取用得到的字段）。
@@ -74,6 +82,9 @@ type coingeckoMarket struct {
 	CurrentPrice     float64 `json:"current_price"`
 	MarketCapRank    int     `json:"market_cap_rank"`
 	TotalVolume      float64 `json:"total_volume"`
+	High24h          float64 `json:"high_24h"`
+	Low24h           float64 `json:"low_24h"`
+	MarketCap        float64 `json:"market_cap"`
 	ATHChangePct     float64 `json:"ath_change_percentage"`
 	Change1hPct      float64 `json:"price_change_percentage_1h_in_currency"`
 	Change24hPct     float64 `json:"price_change_percentage_24h_in_currency"`
@@ -82,9 +93,15 @@ type coingeckoMarket struct {
 	Change24hFallbck float64 `json:"price_change_percentage_24h"` // 无 in_currency 时兜底
 }
 
-// GetCryptoQuotes 拉取默认关注币种（BTC/ETH）的行情快照。
+// GetCryptoQuotes 拉取默认关注币种（BTC/ETH）的行情快照（含衍生品指标）。
+// 供整点播报使用，可容忍衍生品带来的少量额外延迟。
 func GetCryptoQuotes() ([]CryptoQuote, error) {
-	return fetchQuotes(cryptoCoins)
+	quotes, err := fetchQuotes(cryptoCoins)
+	if err != nil {
+		return nil, err
+	}
+	enrichDerivatives(quotes)
+	return quotes, nil
 }
 
 // ResolveSymbols 把用户给的符号列表解析成已知币种，返回命中的币种与未识别的符号。
@@ -111,13 +128,38 @@ func ResolveSymbols(symbols []string) (coins []coin, unknown []string) {
 
 // GetCryptoQuotesBySymbols 按用户给的符号查询行情；符号为空则查默认币种。
 // 返回命中的行情与未识别的符号（供上层提示）。
-func GetCryptoQuotesBySymbols(symbols []string) ([]CryptoQuote, []string, error) {
+// withDerivatives 为 true 时并发补充持仓量/多空比（/price 用）；
+// inline 查询求快，传 false 跳过，避免被 Binance 阻塞拖慢。
+func GetCryptoQuotesBySymbols(symbols []string, withDerivatives bool) ([]CryptoQuote, []string, error) {
 	coins, unknown := ResolveSymbols(symbols)
 	if len(coins) == 0 {
 		return nil, unknown, nil
 	}
 	quotes, err := fetchQuotes(coins)
-	return quotes, unknown, err
+	if err != nil {
+		return quotes, unknown, err
+	}
+	if withDerivatives {
+		enrichDerivatives(quotes)
+	}
+	return quotes, unknown, nil
+}
+
+// enrichDerivatives 并发为每个币种补充 Binance 永续合约的持仓量/多空比（best-effort）。
+// 任一币种失败只是留空对应字段，不影响行情主体。
+func enrichDerivatives(quotes []CryptoQuote) {
+	var wg sync.WaitGroup
+	for i := range quotes {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if d := fetchDerivatives(quotes[i].Name, quotes[i].Price); d != nil {
+				quotes[i].OpenInterestUSD = d.OpenInterestUSD
+				quotes[i].LongShortRatio = d.LongShortRatio
+			}
+		}(i)
+	}
+	wg.Wait()
 }
 
 // fetchQuotes 用 CoinGecko /coins/markets 一次拉取多个币种的量价/动量/位置数据。
@@ -175,6 +217,9 @@ func fetchQuotes(coins []coin) ([]CryptoQuote, error) {
 			Change7d:      m.Change7dPct,
 			Change30d:     m.Change30dPct,
 			Volume24h:     m.TotalVolume,
+			High24h:       m.High24h,
+			Low24h:        m.Low24h,
+			MarketCap:     m.MarketCap,
 			ATHChangePct:  m.ATHChangePct,
 			MarketCapRank: m.MarketCapRank,
 		})
@@ -190,7 +235,23 @@ func FormatCryptoMessage(quotes []CryptoQuote, fng *FearGreed) string {
 	for _, q := range quotes {
 		b.WriteString(fmt.Sprintf("\n%s  $%s  %s %s (24h)\n", q.Name, formatPrice(q.Price), arrow(q.ChangePercent), pct(q.ChangePercent)))
 		b.WriteString(fmt.Sprintf("   1h %s · 7d %s · 30d %s\n", pct(q.Change1h), pct(q.Change7d), pct(q.Change30d)))
-		b.WriteString(fmt.Sprintf("   量 $%s · 距ATH %s · #%d\n", formatCompact(q.Volume24h), pct(q.ATHChangePct), q.MarketCapRank))
+		if q.High24h > 0 || q.Low24h > 0 {
+			b.WriteString(fmt.Sprintf("   高低 $%s~$%s · 量 $%s\n", formatPrice(q.Low24h), formatPrice(q.High24h), formatCompact(q.Volume24h)))
+		} else {
+			b.WriteString(fmt.Sprintf("   量 $%s\n", formatCompact(q.Volume24h)))
+		}
+		b.WriteString(fmt.Sprintf("   市值 $%s · 距ATH %s · #%d\n", formatCompact(q.MarketCap), pct(q.ATHChangePct), q.MarketCapRank))
+		// 衍生品行仅在取到数据时出现（Binance 被地区限制则整行省略）。
+		if q.OpenInterestUSD > 0 || q.LongShortRatio > 0 {
+			parts := make([]string, 0, 2)
+			if q.OpenInterestUSD > 0 {
+				parts = append(parts, "持仓 $"+formatCompact(q.OpenInterestUSD))
+			}
+			if q.LongShortRatio > 0 {
+				parts = append(parts, fmt.Sprintf("多空比 %.2f", q.LongShortRatio))
+			}
+			b.WriteString("   " + strings.Join(parts, " · ") + "\n")
+		}
 	}
 	if fng != nil {
 		b.WriteString(fmt.Sprintf("\n%s 恐惧贪婪指数 %d · %s", fng.Emoji(), fng.Value, fng.LabelCN()))

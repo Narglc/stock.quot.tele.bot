@@ -21,6 +21,11 @@ func broadcastCrypto(bot *telebot.Bot) {
 	fng, _ := stocks.GetFearGreed() // best-effort，失败则不带情绪指标
 	msg := stocks.FormatCryptoMessage(tickers, fng)
 
+	// 附加全市场概览（总市值/占比，best-effort；失败则不追加该段）。
+	if g, gerr := stocks.GetGlobalMarket(); gerr == nil {
+		msg += "\n\n" + stocks.FormatGlobalMarket(g)
+	}
+
 	broadcastToGroups(bot, msg)
 	log.Infof("crypto 播报完成: %s", msg)
 }

@@ -21,7 +21,7 @@ func InlineQuery(c tele.Context) error {
 		symbols = strings.Fields(t)
 	}
 
-	quotes, unknown, err := stocks.GetCryptoQuotesBySymbols(symbols)
+	quotes, unknown, err := stocks.GetCryptoQuotesBySymbols(symbols, false) // inline 求快，不拉衍生品
 	log.Infof("inline sender:[%d - %s] query:%q unknown:%v err:%v",
 		q.Sender.ID, q.Sender.FirstName, q.Text, unknown, err)
 

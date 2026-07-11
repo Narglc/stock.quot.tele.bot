@@ -24,7 +24,7 @@ func Price(c tele.Context) error {
 		symbols = strings.Fields(payload)
 	}
 
-	quotes, unknown, err := stocks.GetCryptoQuotesBySymbols(symbols)
+	quotes, unknown, err := stocks.GetCryptoQuotesBySymbols(symbols, true) // /price 带衍生品指标
 	log.Infof("sender:[%d - %s] chat:[%d - %s] /price payload:%q unknown:%v err:%v",
 		user.ID, user.FirstName, chat.ID, chat.Title, payload, unknown, err)
 
