@@ -46,8 +46,10 @@ func InlineQuery(c tele.Context) error {
 		all := &tele.ArticleResult{
 			Title:       "📊 全部 · " + strings.Join(names, " "),
 			Description: fmt.Sprintf("一次发送全部 %d 个币种行情", len(quotes)),
-			Text:        stocks.FormatCryptoMessage(quotes, fng),
 		}
+		// 必须用 InputMessageContent；ArticleResult.Text（message_text）是已废弃字段，
+		// 现代 Telegram API 会因缺 input_message_content 拒掉整个 answerInlineQuery。
+		all.SetContent(&tele.InputTextMessageContent{Text: stocks.FormatCryptoMessage(quotes, fng)})
 		all.SetResultID("all")
 		results = append(results, all)
 	}
@@ -58,8 +60,8 @@ func InlineQuery(c tele.Context) error {
 			Title: fmt.Sprintf("%s  $%s", qt.Name, stocks.FormatPrice(qt.Price)),
 			Description: fmt.Sprintf("24h %+.2f%% · 7d %+.2f%% · 距ATH %+.2f%%",
 				qt.ChangePercent, qt.Change7d, qt.ATHChangePct),
-			Text: stocks.FormatCryptoMessage([]stocks.CryptoQuote{qt}, fng),
 		}
+		r.SetContent(&tele.InputTextMessageContent{Text: stocks.FormatCryptoMessage([]stocks.CryptoQuote{qt}, fng)})
 		r.SetResultID(qt.Name)
 		results = append(results, r)
 	}
@@ -72,7 +74,8 @@ func InlineQuery(c tele.Context) error {
 
 // answerSingle 用一条文本结果回应 inline 查询（错误/空结果提示）。
 func answerSingle(c tele.Context, id, title, desc, text string) error {
-	r := &tele.ArticleResult{Title: title, Description: desc, Text: text}
+	r := &tele.ArticleResult{Title: title, Description: desc}
+	r.SetContent(&tele.InputTextMessageContent{Text: text})
 	r.SetResultID(id)
 	return c.Answer(&tele.QueryResponse{
 		Results:   tele.Results{r},
