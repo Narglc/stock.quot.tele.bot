@@ -76,6 +76,7 @@ func main() {
 	b.Handle("/wakeup", handler.Wakeup)
 	b.Handle("/sticker", handler.Sticker)
 	b.Handle("/price", handler.Price)
+	b.Handle("/help", handler.Help)
 
 	b.Handle(tele.OnText, handler.OnText)
 	b.Handle(tele.OnSticker, handler.OnSticker)
@@ -112,6 +113,7 @@ func main() {
 		{Text: "/wakeup", Description: "提神醒脑"},
 		{Text: "/sticker", Description: "精选表情包"},
 		{Text: "/price", Description: "查行情（可加币种，如 /price btc eth）"},
+		{Text: "/help", Description: "命令说明"},
 	}
 
 	err = b.SetCommands(commands)
