@@ -12,6 +12,7 @@ const helpText = `🤖 大师使用说明
 /price [币种]   查即时行情，不带参默认 BTC/ETH
               例：/price btc eth sol（含涨跌/成交额/持仓量/多空比）
               也可在任意聊天里输入 @大师 btc eth 直接查（inline）
+/liqmap [币种]  清算图：热力图 + 清算地图两张图，默认 BTC（如 /liqmap eth）
 
 ⏰ 定时提醒
 /register     把本群登记进提醒名单，之后才会收到：

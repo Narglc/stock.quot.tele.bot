@@ -44,11 +44,17 @@ type TTSConfig struct {
 	} `mapstructure:"http"`
 }
 
+// ApifyConfig：清算图（CoinAnk 热力图）数据源的 Apify token。留空则 /liqmap 不可用。
+type ApifyConfig struct {
+	Token string `mapstructure:"token"`
+}
+
 type Config struct {
 	Telegram TelegramConfig `mapstructure:"telegram"`
 	Redis    RedisConfig    `mapstructure:"redis"`
 	MCP      MCPConfig      `mapstructure:"mcp"`
 	TTS      TTSConfig      `mapstructure:"tts"`
+	Apify    ApifyConfig    `mapstructure:"apify"`
 	// 日志
 	LoggerConfig logger.LoggerConfig `json:"logger" mapstructure:"logger"`
 }
@@ -81,6 +87,7 @@ func InitConfig(configPath string) (*Config, bool) {
 	_ = viper.BindEnv("tts.http.url", "TTS_HTTP_URL")
 	_ = viper.BindEnv("tts.http.voice", "TTS_HTTP_VOICE")
 	_ = viper.BindEnv("tts.http.token", "TTS_HTTP_TOKEN")
+	_ = viper.BindEnv("apify.token", "APIFY_TOKEN")
 
 	if err := viper.ReadInConfig(); err != nil {
 		fmt.Printf("config file %s read failed. %v\n", configPath, err)

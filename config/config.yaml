@@ -18,6 +18,8 @@ tts:
     url: ""                         # TTS_HTTP_URL，如 http://127.0.0.1:5000/tts
     voice: ""                       # TTS_HTTP_VOICE，转发给 worker（可空，用 worker 默认）
     token: ""                       # TTS_HTTP_TOKEN，与 worker 约定的共享密钥（可空）
+apify:
+  token: ""                         # APIFY_TOKEN，清算图(/liqmap)数据源，留空则 /liqmap 不可用
 logger:
   level: "debug"
   logPath: "logs/tele.bog.log"

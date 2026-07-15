@@ -95,6 +95,7 @@ func main() {
 	b.Handle("/wakeup", handler.Wakeup)
 	b.Handle("/sticker", handler.Sticker)
 	b.Handle("/price", handler.Price)
+	b.Handle("/liqmap", handler.Liqmap)
 	b.Handle("/help", handler.Help)
 
 	b.Handle(tele.OnText, handler.OnText)
@@ -102,6 +103,9 @@ func main() {
 	b.Handle(tele.OnPhoto, handler.OnPhoto)
 	b.Handle(tele.OnMyChatMember, handler.OnMyChatMember)
 	b.Handle(tele.OnQuery, handler.InlineQuery) // inline 行情查询（需 @BotFather /setinline 开启）
+
+	// 注入 /liqmap 用的 Apify token（空则该命令提示未启用）
+	handler.SetApifyToken(appConfig.Apify.Token)
 
 	// 从 Redis 恢复已注册群，再启动定时任务（否则重启后 GroupMap 为空、无人收播报）
 	schedule.LoadGroups()
@@ -133,6 +137,7 @@ func main() {
 		{Text: "/wakeup", Description: "提神醒脑"},
 		{Text: "/sticker", Description: "精选表情包"},
 		{Text: "/price", Description: "查行情（可加币种，如 /price btc eth）"},
+		{Text: "/liqmap", Description: "清算图（可加币种，如 /liqmap btc）"},
 		{Text: "/help", Description: "命令说明"},
 	}
 
