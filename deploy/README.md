@@ -58,6 +58,26 @@ curl -s https://<你的域名>/.well-known/oauth-authorization-server | head
 
 > 更新 bot 代码：`docker compose up -d --build bot`。
 
+### 语音播报（TTS，可选）
+
+启用 MCP 的 `send_voice` 需在 `bot.env` 配 `TTS_PROVIDER`。docker 下两条路差别很大：
+
+| provider | 改 Dockerfile？ | 说明 |
+|---|---|---|
+| **`azure`** | **不用** | 默认 `deploy/Dockerfile`（distroless）纯 Go HTTP + ogg 直出，开箱即用。只在 `bot.env` 填 `TTS_PROVIDER=azure` / `AZURE_TTS_KEY` / `AZURE_TTS_REGION` 即可 |
+| **`edge`** | **要** | edge-tts 需 Python + 转码工具，distroless 跑不了。改用 **`deploy/Dockerfile.edge`**（debian-slim + edge-tts + mpg123 + opus-tools），`bot.env` 改为 `TTS_PROVIDER=edge` / `EDGE_TTS_VOICE=...` |
+
+edge 版把 compose 里 bot 的 build 指到该文件，再 `docker compose up -d --build bot`：
+
+```yaml
+  bot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.edge   # 默认是 deploy/Dockerfile
+```
+
+**结论：docker 里用 Azure 最省事（只加环境变量，镜像不动）；用 edge 需换成 `Dockerfile.edge`。**
+
 ### 数据与日志（运行时目录，已 gitignore）
 
 首次 `up` 会在 compose 同级自动创建：

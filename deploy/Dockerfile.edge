@@ -1,0 +1,26 @@
+# gohome bot 镜像（edge-tts 版）
+# 默认 deploy/Dockerfile 用 distroless（最小/无 shell），无法跑 edge-tts。
+# 用 edge 语音时改用本文件：Go 静态编译 → debian-slim + Python(edge-tts) + 轻量转码工具。
+# 构建：docker compose build（把 compose 里 bot 的 dockerfile 指到 deploy/Dockerfile.edge）
+#   bot:
+#     build:
+#       context: ..
+#       dockerfile: deploy/Dockerfile.edge
+FROM golang:1.25 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/bot main.go
+
+FROM debian:12-slim
+WORKDIR /app
+# edge-tts（Python）+ 语音气泡转码工具（mpg123 解 mp3、opus-tools 编 opus，合计极小）
+# 若想用 ffmpeg 替代 mpg123+opus-tools，把下面两个换成 ffmpeg 即可（体积更大）。
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-pip mpg123 opus-tools ca-certificates \
+ && pip3 install --no-cache-dir --break-system-packages edge-tts \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/bot /app/bot
+COPY config/config.yaml /app/config/config.yaml
+ENTRYPOINT ["/app/bot", "-f", "/app/config/config.yaml"]
