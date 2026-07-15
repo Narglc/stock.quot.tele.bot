@@ -10,6 +10,12 @@ type Sender interface {
 	Name() string
 }
 
+// VoiceSender 是「发送语音/音频」的可选能力。实现了本接口的 Sender 才支持 send_voice。
+// format 决定形态："ogg"(Ogg/Opus)走语音气泡 sendVoice，"mp3" 走音频文件 sendAudio。
+type VoiceSender interface {
+	SendVoice(audio []byte, format, caption, recipient string) (messageID string, err error)
+}
+
 var registry = map[string]Sender{}
 
 // Register 注册一个平台发送器（按 Name 覆盖）。

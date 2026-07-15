@@ -16,6 +16,7 @@ import (
 	logger "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 	"github.com/narglc/stock.quot.tele.bot/schedule"
 	"github.com/narglc/stock.quot.tele.bot/sender"
+	"github.com/narglc/stock.quot.tele.bot/tts"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -24,6 +25,22 @@ var (
 	// -mktoken <chat_id>：用 MCP_JWT_SECRET 签发一个该 chat_id 的 MCP JWT 后退出，不启动 bot。
 	mkToken = flag.Int64("mktoken", 0, "签发一个 chat_id 的 MCP JWT 并退出")
 )
+
+// buildSynthesizer 按配置构造 TTS 合成器；provider 空=不启用语音（返回 nil）。
+// 新增实现时在这里加一个 case，其余（send_voice / sender）零改动。
+func buildSynthesizer(cfg *config.TTSConfig) tts.Synthesizer {
+	switch cfg.Provider {
+	case "":
+		return nil
+	case "azure":
+		return tts.NewAzure(cfg.Azure.Key, cfg.Azure.Region, cfg.Azure.Voice)
+	case "edge":
+		return tts.NewEdge(cfg.Edge.Voice)
+	default:
+		logger.Warnf("未知 tts.provider=%q，语音功能不启用", cfg.Provider)
+		return nil
+	}
+}
 
 func validateConfig(cfg *config.Config) error {
 	if cfg.Telegram.Token == "" {
@@ -91,8 +108,9 @@ func main() {
 	// 发送目标：鉴权开启时取 JWT 的 chat_id，否则回落 TargetChatID
 	if appConfig.MCP.TargetChatID != 0 {
 		sender.Register(sender.NewTelegramSender(b))
+		synth := buildSynthesizer(&appConfig.TTS)
 		go func() {
-			if err := mcpserver.Serve(appConfig.MCP.Addr, appConfig.MCP.JWTSecret, appConfig.MCP.TargetChatID); err != nil {
+			if err := mcpserver.Serve(appConfig.MCP.Addr, appConfig.MCP.JWTSecret, appConfig.MCP.TargetChatID, synth); err != nil {
 				logger.Errorf("MCP server 退出: %v", err)
 			}
 		}()

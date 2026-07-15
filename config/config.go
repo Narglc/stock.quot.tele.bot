@@ -24,10 +24,25 @@ type MCPConfig struct {
 	JWTSecret string `mapstructure:"jwt_secret"`
 }
 
+// TTSConfig 文本转语音配置。Provider 空=不启用语音；"azure" / "edge" 可切换。
+// 敏感项（azure.key）留空由环境变量覆盖。
+type TTSConfig struct {
+	Provider string `mapstructure:"provider"`
+	Azure    struct {
+		Key    string `mapstructure:"key"`
+		Region string `mapstructure:"region"`
+		Voice  string `mapstructure:"voice"`
+	} `mapstructure:"azure"`
+	Edge struct {
+		Voice string `mapstructure:"voice"`
+	} `mapstructure:"edge"`
+}
+
 type Config struct {
 	Telegram TelegramConfig `mapstructure:"telegram"`
 	Redis    RedisConfig    `mapstructure:"redis"`
 	MCP      MCPConfig      `mapstructure:"mcp"`
+	TTS      TTSConfig      `mapstructure:"tts"`
 	// 日志
 	LoggerConfig logger.LoggerConfig `json:"logger" mapstructure:"logger"`
 }
@@ -52,6 +67,11 @@ func InitConfig(configPath string) (*Config, bool) {
 	_ = viper.BindEnv("mcp.target_chat_id", "MCP_TARGET_CHAT_ID")
 	_ = viper.BindEnv("mcp.addr", "MCP_ADDR")
 	_ = viper.BindEnv("mcp.jwt_secret", "MCP_JWT_SECRET")
+	_ = viper.BindEnv("tts.provider", "TTS_PROVIDER")
+	_ = viper.BindEnv("tts.azure.key", "AZURE_TTS_KEY")
+	_ = viper.BindEnv("tts.azure.region", "AZURE_TTS_REGION")
+	_ = viper.BindEnv("tts.azure.voice", "AZURE_TTS_VOICE")
+	_ = viper.BindEnv("tts.edge.voice", "EDGE_TTS_VOICE")
 
 	if err := viper.ReadInConfig(); err != nil {
 		fmt.Printf("config file %s read failed. %v\n", configPath, err)

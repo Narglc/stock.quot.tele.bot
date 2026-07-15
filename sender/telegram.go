@@ -1,6 +1,7 @@
 package sender
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 
@@ -46,6 +47,30 @@ func (t *TelegramSender) Send(md, recipient string) (string, error) {
 	}
 
 	msg, err := t.bot.Send(to, md)
+	if err != nil {
+		return "", err
+	}
+	return strconv.Itoa(msg.ID), nil
+}
+
+// SendVoice 发送语音/音频。format="ogg"(Ogg/Opus) 走语音气泡；其它(如 mp3)走音频文件。
+func (t *TelegramSender) SendVoice(audio []byte, format, caption, recipient string) (string, error) {
+	chatID, err := strconv.ParseInt(recipient, 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("invalid telegram recipient %q: %w", recipient, err)
+	}
+	to := tele.ChatID(chatID)
+	file := tele.FromReader(bytes.NewReader(audio))
+
+	var what interface{}
+	switch format {
+	case "ogg", "opus":
+		what = &tele.Voice{File: file, Caption: caption}
+	default:
+		what = &tele.Audio{File: file, Caption: caption, FileName: "voice." + format}
+	}
+
+	msg, err := t.bot.Send(to, what)
 	if err != nil {
 		return "", err
 	}
