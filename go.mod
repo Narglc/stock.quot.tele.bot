@@ -11,6 +11,7 @@ require (
 	github.com/sirupsen/logrus v1.6.0
 	github.com/spf13/viper v1.13.0
 	github.com/yuin/goldmark v1.8.2
+	golang.org/x/image v0.18.0
 	gopkg.in/telebot.v3 v3.3.8
 )
 
@@ -34,7 +35,7 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
+	golang.org/x/text v0.16.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

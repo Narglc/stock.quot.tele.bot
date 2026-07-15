@@ -30,6 +30,17 @@ type LiqMap struct {
 	MaxValue     float64      // 最新列峰值，用于归一化/判断强弱
 }
 
+// LiqHeatmap 是完整的清算热力图网格（时间 × 价格）。
+type LiqHeatmap struct {
+	Symbol       string
+	Interval     string
+	Prices       []float64   // y 轴价格阶梯，长度 P
+	Times        []int64     // x 轴时间戳(ms)，长度 T
+	Values       [][]float64 // [价格索引][时间索引] 清算额(USD)，P×T
+	CurrentPrice float64
+	MaxValue     float64
+}
+
 // apifyClient：Apify actor 同步运行较慢（约 60~90s），用长超时。
 var apifyClient = &http.Client{Timeout: 120 * time.Second}
 
@@ -46,14 +57,41 @@ type liqMapResponse struct {
 	} `json:"liqHeatMap"`
 }
 
-// GetLiqMap 通过 Apify(CoinAnk) 拉取某币种清算热力图，取最新时间列聚合成清算地图。
+// GetLiqHeatmap 通过 Apify(CoinAnk) 拉取某币种完整清算热力图网格 + OKX 现价。
 // symbol 形如 "BTC"，内部拼成 "BTCUSDT"。apifyToken 走环境/配置传入，勿硬编码。
+func GetLiqHeatmap(symbol, apifyToken string) (*LiqHeatmap, error) {
+	r, err := fetchLiqRaw(symbol, apifyToken)
+	if err != nil {
+		return nil, err
+	}
+	h, err := buildHeatmap(strings.ToUpper(symbol), r)
+	if err != nil {
+		return nil, err
+	}
+	cur, err := fetchLastPrice(symbol)
+	if err != nil {
+		log.Warnf("清算图取现价失败 %s: %v，回落价格轴中点", symbol, err)
+		cur = h.Prices[len(h.Prices)/2]
+	}
+	h.CurrentPrice = cur
+	return h, nil
+}
+
+// GetLiqMap 取清算地图（现价上/下方清算簇），底层复用 GetLiqHeatmap 的最新时间列。
 func GetLiqMap(symbol, apifyToken string) (*LiqMap, error) {
+	h, err := GetLiqHeatmap(symbol, apifyToken)
+	if err != nil {
+		return nil, err
+	}
+	return h.ToMap(), nil
+}
+
+// fetchLiqRaw 调 Apify 同步接口并反序列化出首条有效响应。
+func fetchLiqRaw(symbol, apifyToken string) (*liqMapResponse, error) {
 	if apifyToken == "" {
 		return nil, fmt.Errorf("apify token 为空")
 	}
 	pair := strings.ToUpper(symbol) + "USDT"
-
 	url := "https://api.apify.com/v2/acts/api_merge~coinank-liquidation-heatmap/run-sync-get-dataset-items?token=" + apifyToken
 	reqBody, _ := json.Marshal(map[string]string{"symbol": pair})
 	resp, err := apifyClient.Post(url, "application/json", bytes.NewReader(reqBody))
@@ -69,7 +107,11 @@ func GetLiqMap(symbol, apifyToken string) (*LiqMap, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("apify bad status %d: %s", resp.StatusCode, truncate(string(raw), 200))
 	}
+	return parseLiqResponse(raw)
+}
 
+// parseLiqResponse 把 Apify 响应体解析成首条有效记录（与网络解耦，便于测试）。
+func parseLiqResponse(raw []byte) (*liqMapResponse, error) {
 	var arr []liqMapResponse
 	if err := json.Unmarshal(raw, &arr); err != nil {
 		return nil, fmt.Errorf("解析失败: %v, body: %s", err, truncate(string(raw), 200))
@@ -77,55 +119,72 @@ func GetLiqMap(symbol, apifyToken string) (*LiqMap, error) {
 	if len(arr) == 0 || !arr[0].Success {
 		return nil, fmt.Errorf("apify 返回无有效数据")
 	}
-	hm := arr[0].LiqHeatMap
-	if len(hm.PriceArray) == 0 || len(hm.ChartTimeArray) == 0 {
-		// actor 在配额用尽等情况下也回 success:true 但无数据，把 message 带出来。
+	if len(arr[0].LiqHeatMap.PriceArray) == 0 || len(arr[0].LiqHeatMap.ChartTimeArray) == 0 {
+		// 配额用尽等情况下 actor 也回 success:true 但无数据，把 message 带出来。
 		return nil, fmt.Errorf("热力图数据为空: %s", arr[0].Message)
 	}
+	return &arr[0], nil
+}
 
-	prices := hm.PriceArray
-	lastX := strconv.Itoa(len(hm.ChartTimeArray) - 1) // 最新时间列索引
-
-	// 只取最新时间列，聚合出「价位索引 -> 清算额」。
-	byPrice := map[int]float64{}
+// buildHeatmap 把稀疏三元组展开成 P×T 稠密网格。
+func buildHeatmap(symbol string, r *liqMapResponse) (*LiqHeatmap, error) {
+	hm := r.LiqHeatMap
+	P, T := len(hm.PriceArray), len(hm.ChartTimeArray)
+	if P == 0 || T == 0 {
+		return nil, fmt.Errorf("热力图数据为空")
+	}
+	values := make([][]float64, P)
+	for i := range values {
+		values[i] = make([]float64, T)
+	}
 	for _, cell := range hm.Data {
-		if len(cell) != 3 || cell[0] != lastX {
+		if len(cell) != 3 {
 			continue
 		}
+		x, _ := strconv.Atoi(cell[0])
+		y, _ := strconv.Atoi(cell[1])
 		v, _ := strconv.ParseFloat(cell[2], 64)
+		if x >= 0 && x < T && y >= 0 && y < P {
+			values[y][x] = v
+		}
+	}
+	return &LiqHeatmap{
+		Symbol:   symbol,
+		Interval: r.Interval,
+		Prices:   hm.PriceArray,
+		Times:    hm.ChartTimeArray,
+		Values:   values,
+		MaxValue: hm.MaxLiqValue,
+	}, nil
+}
+
+// ToMap 从热力图最新时间列派生清算地图（按现价拆上/下方，按额降序）。
+func (h *LiqHeatmap) ToMap() *LiqMap {
+	m := &LiqMap{
+		Symbol:       h.Symbol,
+		CurrentPrice: h.CurrentPrice,
+		Interval:     h.Interval,
+		MaxValue:     h.MaxValue,
+	}
+	if len(h.Times) == 0 {
+		return m
+	}
+	lastX := len(h.Times) - 1
+	for yi, price := range h.Prices {
+		v := h.Values[yi][lastX]
 		if v <= 0 {
 			continue
 		}
-		yi, _ := strconv.Atoi(cell[1])
-		if yi >= 0 && yi < len(prices) {
-			byPrice[yi] += v
-		}
-	}
-
-	cur, err := fetchLastPrice(symbol)
-	if err != nil {
-		log.Warnf("清算地图取现价失败 %s: %v，回落价格轴中点", symbol, err)
-		cur = prices[len(prices)/2]
-	}
-
-	m := &LiqMap{
-		Symbol:       strings.ToUpper(symbol),
-		CurrentPrice: cur,
-		Interval:     arr[0].Interval,
-		MaxValue:     hm.MaxLiqValue,
-	}
-	for yi, v := range byPrice {
-		c := LiqCluster{Price: prices[yi], Value: v}
-		if c.Price >= cur {
+		c := LiqCluster{Price: price, Value: v}
+		if price >= h.CurrentPrice {
 			m.Above = append(m.Above, c)
 		} else {
 			m.Below = append(m.Below, c)
 		}
 	}
-	// 按清算额降序：最大的磁吸簇排前面。
 	sort.Slice(m.Above, func(i, j int) bool { return m.Above[i].Value > m.Above[j].Value })
 	sort.Slice(m.Below, func(i, j int) bool { return m.Below[i].Value > m.Below[j].Value })
-	return m, nil
+	return m
 }
 
 // fetchLastPrice 取某币种 OKX 永续最新价，用于把清算簇拆成现价上/下方。
@@ -146,7 +205,7 @@ func fetchLastPrice(symbol string) (float64, error) {
 // FormatLiqMap 把清算地图排成文案，上/下方各取额最大的 topN 个簇。
 func FormatLiqMap(m *LiqMap, topN int) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("🔥 %s 清算地图 · 现价 $%s (%s)\n", m.Symbol, FormatPrice(m.CurrentPrice), m.Interval))
+	fmt.Fprintf(&b, "🔥 %s 清算地图 · 现价 $%s (%s)\n", m.Symbol, FormatPrice(m.CurrentPrice), m.Interval)
 	b.WriteString("\n↑ 上方空头爆仓区（价格上行会去扫）\n")
 	writeClusters(&b, m.Above, topN)
 	b.WriteString("\n↓ 下方多头爆仓区（价格下行会去扫）\n")
