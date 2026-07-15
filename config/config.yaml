@@ -14,6 +14,10 @@ tts:
     voice: "zh-CN-XiaoxiaoNeural"   # 中文女声；可换 zh-CN-YunxiNeural 等
   edge:
     voice: "zh-CN-XiaoxiaoNeural"   # edge-tts 备选（需服务器装 edge-tts）
+  http:                             # 委托外部 HTTP TTS（本地 worker 经 ssh -R 映射到回环）
+    url: ""                         # TTS_HTTP_URL，如 http://127.0.0.1:5000/tts
+    voice: ""                       # TTS_HTTP_VOICE，转发给 worker（可空，用 worker 默认）
+    token: ""                       # TTS_HTTP_TOKEN，与 worker 约定的共享密钥（可空）
 logger:
   level: "debug"
   logPath: "logs/tele.bog.log"

@@ -63,6 +63,8 @@ TTS_PROVIDER=azure AZURE_TTS_KEY=<key> AZURE_TTS_REGION=eastasia \
 | `tts.azure.region` | `AZURE_TTS_REGION` | Azure 区域，如 `eastasia` / `eastus` |
 | `tts.azure.voice` | `AZURE_TTS_VOICE` | 声色，默认 `zh-CN-XiaoxiaoNeural` |
 | `tts.edge.voice` | `EDGE_TTS_VOICE` | edge-tts 声色，默认 `zh-CN-XiaoxiaoNeural` |
+| `tts.http.url` | `TTS_HTTP_URL` | 委托外部 HTTP TTS（provider=http 时），如本地 worker 经 ssh -R 映射的 `http://127.0.0.1:5000/tts` |
+| `tts.http.token` | `TTS_HTTP_TOKEN` | 与 worker 约定的共享密钥（可空） |
 
 ## MCP 发消息服务
 
@@ -119,6 +121,9 @@ MCP_JWT_SECRET=<你的密钥> ./bot -mktoken <chat_id>
 |---|---|---|---|---|
 | `azure` | 需 `AZURE_TTS_KEY`+region | Ogg/Opus 直出 | 无需 | 官方稳定、语音气泡免转码；需信用卡 |
 | `edge` | 免 key | mp3 | 需转 Ogg 才是语音气泡 | 免费、同款微软神经语音；非官方接口 |
+| `http` | 可选共享密钥 | 由 worker 决定 | worker 侧做 | **委托本地 worker 合成**（edge/ChatTTS+GPU），VPS 只转发，最省 VPS 依赖 |
+
+> **`http` provider（split 架构，推荐 VPS 磁盘/依赖紧张时用）**：把重依赖放本地 worker，经 `ssh -R` 反向隧道映射到 VPS 回环，VPS 设 `TTS_PROVIDER=http` + `TTS_HTTP_URL` 即可。VPS 完全不需要 Python/ffmpeg。详见 [`deploy/tts-worker/`](deploy/tts-worker/README.md)。
 
 ### 转码（edge 用；发语音气泡需要）
 

@@ -36,6 +36,8 @@ func buildSynthesizer(cfg *config.TTSConfig) tts.Synthesizer {
 		return tts.NewAzure(cfg.Azure.Key, cfg.Azure.Region, cfg.Azure.Voice)
 	case "edge":
 		return tts.NewEdge(cfg.Edge.Voice)
+	case "http":
+		return tts.NewHTTP(cfg.Http.URL, cfg.Http.Voice, cfg.Http.Token)
 	default:
 		logger.Warnf("未知 tts.provider=%q，语音功能不启用", cfg.Provider)
 		return nil

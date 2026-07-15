@@ -36,6 +36,12 @@ type TTSConfig struct {
 	Edge struct {
 		Voice string `mapstructure:"voice"`
 	} `mapstructure:"edge"`
+	// Http：把合成委托给外部 HTTP TTS 服务（如本地 worker 经 ssh -R 映射到回环）。
+	Http struct {
+		URL   string `mapstructure:"url"`
+		Voice string `mapstructure:"voice"`
+		Token string `mapstructure:"token"`
+	} `mapstructure:"http"`
 }
 
 type Config struct {
@@ -72,6 +78,9 @@ func InitConfig(configPath string) (*Config, bool) {
 	_ = viper.BindEnv("tts.azure.region", "AZURE_TTS_REGION")
 	_ = viper.BindEnv("tts.azure.voice", "AZURE_TTS_VOICE")
 	_ = viper.BindEnv("tts.edge.voice", "EDGE_TTS_VOICE")
+	_ = viper.BindEnv("tts.http.url", "TTS_HTTP_URL")
+	_ = viper.BindEnv("tts.http.voice", "TTS_HTTP_VOICE")
+	_ = viper.BindEnv("tts.http.token", "TTS_HTTP_TOKEN")
 
 	if err := viper.ReadInConfig(); err != nil {
 		fmt.Printf("config file %s read failed. %v\n", configPath, err)

@@ -40,3 +40,4 @@ deploy/**/*.env
 # 部署运行时目录（redis 数据 / 日志）
 deploy/**/data/
 deploy/**/logs/
+.venv/*
