@@ -96,6 +96,7 @@ func main() {
 	b.Handle("/sticker", handler.Sticker)
 	b.Handle("/price", handler.Price)
 	b.Handle("/liqmap", handler.Liqmap)
+	b.Handle("/dice", handler.Dice)
 	b.Handle("/help", handler.Help)
 
 	b.Handle(tele.OnText, handler.OnText)
@@ -138,6 +139,7 @@ func main() {
 		{Text: "/sticker", Description: "精选表情包"},
 		{Text: "/price", Description: "查行情（可加币种，如 /price btc eth）"},
 		{Text: "/liqmap", Description: "清算图（可加币种，如 /liqmap btc）"},
+		{Text: "/dice", Description: "掷骰子（可选 飞镖/篮球/足球/老虎机/保龄球）"},
 		{Text: "/help", Description: "命令说明"},
 	}
 
