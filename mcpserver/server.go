@@ -70,6 +70,7 @@ func makeVoiceHandler(defaultTarget int64, synth tts.Synthesizer) server.ToolHan
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		platform := req.GetString("platform", "telegram")
+		caption := req.GetString("caption", "") // 可选：附带在（首条）语音气泡旁的文本
 
 		recipient, ok := resolveRecipient(ctx, defaultTarget)
 		if !ok {
@@ -104,7 +105,11 @@ func makeVoiceHandler(defaultTarget int64, synth tts.Synthesizer) server.ToolHan
 				}
 			}
 			audio = tts.ToOggOpus(ctx, audio) // 有必要才转码（Azure 已是 ogg 直接过；edge 的 mp3 转 ogg 发语音气泡）
-			id, verr := vs.SendVoice(audio.Data, audio.Format, "", recipient)
+			capText := "" // caption 只挂首条，避免多段时重复刷屏
+			if i == 0 {
+				capText = caption
+			}
+			id, verr := vs.SendVoice(audio.Data, audio.Format, capText, recipient)
 			if verr != nil {
 				return mcp.NewToolResultError(verr.Error()), nil
 			}
@@ -138,6 +143,7 @@ func Serve(addr, jwtSecret string, defaultTarget int64, synth tts.Synthesizer) e
 			mcp.WithDescription("把文本转成语音发送（TTS，目标同 send_message；长文本自动分段逐条发）"),
 			mcp.WithString("platform", mcp.Description("目标平台，默认 telegram")),
 			mcp.WithString("text", mcp.Required(), mcp.Description("要朗读的文本")),
+			mcp.WithString("caption", mcp.Description("可选：附带在语音气泡旁的文本（≤1024 字符，只挂首条）")),
 		)
 		s.AddTool(voiceTool, makeVoiceHandler(defaultTarget, synth))
 		log.Infof("MCP send_voice 已启用（TTS provider=%s）", synth.Name())
