@@ -23,6 +23,11 @@ services:
       MCP_ADDR: 0.0.0.0:8081  # 仅 docker 内网可达，不 publish 到宿主 = 等价回环
     volumes:
       - ./logs:/app/logs       # bot 日志（lumberjack 滚动文件）落到本地
+    # 仅当用 TTS http provider（本地 worker + ssh -R 隧道）时取消注释：让容器经宿主网关
+    # 访问隧道（配合本地 ssh -R 0.0.0.0:5000 + VPS sshd GatewayPorts；bot.env 里
+    # TTS_HTTP_URL=http://host.docker.internal:5000/tts）。详见 deploy/tts-worker/README.md
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
     depends_on:
       - redis
     # 注意：不要给 bot 加 ports，8081 只暴露给 proxy，不对宿主/公网开放

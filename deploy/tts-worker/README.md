@@ -31,6 +31,8 @@ curl -X POST http://127.0.0.1:5000/tts \
 ```bash
 # 推荐 autossh 常驻自愈；无 autossh 用 ssh -N -R 亦可
 autossh -M 0 -N -R 5000:127.0.0.1:5000 user@your-vps
+
+ssh -N -R 5000:127.0.0.1:5000 root@192.129.148.175
 ```
 `ssh -R` 是**本地出站** SSH，NAT / 无公网 IP 都不影响；VPS 侧只在回环 `127.0.0.1:5000` 可达，不对公网暴露。
 
@@ -43,6 +45,57 @@ TTS_HTTP_URL=http://127.0.0.1:5000/tts
 TTS_HTTP_TOKEN=<随机串>
 ```
 worker 直出 Ogg/Opus → VPS 端 `ToOggOpus` 直接放行，**VPS 完全不需要 ffmpeg/转码工具**。
+
+## 3.5 Docker 下（bot 在容器里）—— 必看
+
+容器的 `127.0.0.1` 是**容器自己的回环**，不是宿主机的。`ssh -R` 默认把隧道挂在宿主的
+`127.0.0.1:5000`，容器里 `http://127.0.0.1:5000` 连的是容器自身 → 报
+`dial tcp 127.0.0.1:5000: connect: connection refused`，TTS 被降级发文本。三处一起改：
+
+**① 隧道监听所有接口**（让容器经宿主网关够得到）。本地执行：
+
+```bash
+ssh -N -R 0.0.0.0:5000:127.0.0.1:5000 <user>@<vps>
+# 常驻：autossh -M 0 -N -R 0.0.0.0:5000:127.0.0.1:5000 <user>@<vps>
+```
+
+并在 **VPS 的 `/etc/ssh/sshd_config`** 打开（默认 `no` 会强制只绑回环，容器够不到）：
+
+```
+GatewayPorts clientspecified
+```
+
+改后 `sudo systemctl restart sshd`。
+
+**② compose 给 bot 加宿主网关解析**（`deploy/docker-compose.yml` 的 `bot` 服务）：
+
+```yaml
+  bot:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+**③ `bot.env` 的 URL 改成宿主网关**：
+
+```bash
+TTS_HTTP_URL=http://host.docker.internal:5000/tts
+```
+
+改完 `docker compose up -d bot` 重建。
+
+排错：
+
+```bash
+docker ps | grep bot                     # 确认 bot 在容器里
+ss -ltnp | grep 5000                     # 宿主上隧道应监听 0.0.0.0:5000（不是 127.0.0.1:5000）
+# 从宿主经 docker 网关测（容器走的就是这条链路；网关默认 172.17.0.1，
+# 自定义 compose 网络可能是 172.18.0.1 等，用 docker network inspect 查）：
+curl -s -X POST http://172.17.0.1:5000/tts -H 'Content-Type: application/json' \
+  -d '{"text":"测试"}' -o t.ogg && ls -l t.ogg
+```
+
+> 裸机（bot 直接跑在宿主）无此问题：`127.0.0.1:5000` 即可，隧道也用回环版
+> `ssh -R 5000:127.0.0.1:5000`，无需 `GatewayPorts` / `extra_hosts`。
 
 ## 4. 接口约定
 
