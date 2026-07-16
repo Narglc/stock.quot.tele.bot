@@ -177,8 +177,9 @@ func Wakeup(c tele.Context) error {
 	// 多试几次：拉到一张 Telegram 装得下（≤50MB）的图再发。
 	// 超过 Photo 限制的会作为文件(Document)发送，只有连 50MB 都超才跳过换下一张。
 	var (
-		pic    *fetchedPic
-		picUrl string
+		pic     *fetchedPic
+		picUrl  string
+		lastErr error // 最后一次失败原因，兜底时带进消息
 	)
 	for i := 0; i < maxPicRetry; i++ {
 		src := payload
@@ -186,13 +187,20 @@ func Wakeup(c tele.Context) error {
 			src = getRandomPicSrc() // 未指定图源时每次重试都换一个源
 		}
 
-		url, _ := randompic.GetRandomPic(src)
+		url, gerr := randompic.GetRandomPic(src)
+		if gerr != nil {
+			lastErr = gerr
+			log.Warnf("图源[%s]第%d次取图失败: %v", src, i+1, gerr)
+			continue
+		}
 		if url == "" {
+			lastErr = fmt.Errorf("图源[%s]返回空 url", src)
 			continue
 		}
 
 		p, verr := fetchPic(url)
 		if verr != nil {
+			lastErr = fmt.Errorf("下载图片失败(%s): %w", src, verr)
 			log.Warnf("图源[%s]第%d次取图不可用: url=%s err=%v", src, i+1, url, verr)
 			continue
 		}
@@ -202,9 +210,14 @@ func Wakeup(c tele.Context) error {
 
 	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v, payload:%+v picUrl:%+v asPhoto:%v\n", user.ID, user.FirstName, chat.ID, chat.Title, text, payload, picUrl, pic != nil && pic.asPhoto)
 
-	// 几次都没拿到合适的图 → 回落一张默认表情，避免无响应
+	// 几次都没拿到合适的图 → 回落一张默认表情，并把失败原因一起告知
 	if pic == nil {
-		_, err := c.Bot().Send(chat, &tele.Sticker{File: tele.File{FileID: dao.DefaultSticker}})
+		_, _ = c.Bot().Send(chat, &tele.Sticker{File: tele.File{FileID: dao.DefaultSticker}})
+		reason := "未知原因"
+		if lastErr != nil {
+			reason = lastErr.Error()
+		}
+		_, err := c.Bot().Send(chat, fmt.Sprintf("取图失败了 🥲 先给你张默认的。\n原因：%s", reason))
 		return err
 	}
 
@@ -248,7 +261,7 @@ func sendAsDocument(c tele.Context, chat tele.Recipient, url string, data []byte
 // fetchPic 下载图片并判级：≤10MB 且 宽+高≤10000 可内联为图片，否则作为文件发送。
 // 连 50MB 都超返回 errPicTooLarge，让调用方换一张。返回数据可直接上传。
 func fetchPic(url string) (*fetchedPic, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, err

@@ -2,8 +2,8 @@ package randompic
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
-	"net/http"
 	"sync"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
@@ -52,27 +52,27 @@ func GetSexNyanClt() *SexNyanClt {
 }
 
 func (l *SexNyanClt) GetRandomPic() (string, error) {
-	response, err := http.Get(l.Url)
+	response, err := httpClient.Get(l.Url)
 	if err != nil {
 		log.Errorf("请求失败: %v", err)
-		return "", err
+		return "", fmt.Errorf("sexnyan 请求失败: %w", err)
 	}
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		log.Errorf("读取响应失败: %v", err)
-		return "", err
+		return "", fmt.Errorf("sexnyan 读取响应失败: %w", err)
 	}
 
 	var llrsp SexNyanRsp
 	if err := json.Unmarshal(body, &llrsp); err != nil {
-		return DefaultPics, nil
+		return "", fmt.Errorf("sexnyan 响应解析失败: %w", err)
 	}
 
 	if len(llrsp.Data) == 0 {
 		log.Warnf("sexnyan 返回空数据, msg:%s", llrsp.Msg)
-		return DefaultPics, nil
+		return "", fmt.Errorf("sexnyan 返回空数据: %s", llrsp.Msg)
 	}
 
 	return llrsp.Data[0].Url, nil

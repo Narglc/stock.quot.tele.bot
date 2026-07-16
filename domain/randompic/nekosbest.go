@@ -2,8 +2,8 @@ package randompic
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
-	"net/http"
 	"sync"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
@@ -45,27 +45,27 @@ func GetNekosBestClt() *NekosBestClt {
 }
 
 func (n *NekosBestClt) GetRandomPic() (string, error) {
-	response, err := http.Get(n.Url)
+	response, err := httpClient.Get(n.Url)
 	if err != nil {
 		log.Errorf("请求失败: %v", err)
-		return "", err
+		return "", fmt.Errorf("nekos 请求失败: %w", err)
 	}
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		log.Errorf("读取响应失败: %v", err)
-		return "", err
+		return "", fmt.Errorf("nekos 读取响应失败: %w", err)
 	}
 
 	var rsp NekosBestRsp
 	if err := json.Unmarshal(body, &rsp); err != nil {
-		return DefaultPics, nil
+		return "", fmt.Errorf("nekos 响应解析失败: %w", err)
 	}
 
 	if len(rsp.Results) == 0 {
 		log.Warnf("nekos.best 返回空数据")
-		return DefaultPics, nil
+		return "", fmt.Errorf("nekos 返回空数据")
 	}
 
 	return rsp.Results[0].Url, nil

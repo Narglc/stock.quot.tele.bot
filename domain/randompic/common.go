@@ -1,12 +1,14 @@
 package randompic
 
 import (
-	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
+	"fmt"
+	"net/http"
+	"time"
 )
 
-const (
-	DefaultPics = "http://img5.adesk.com/605455dae7bce72db9fefd3c?sign=8fa8c7f1efd9741a1c529daca53e68c8&t=65d8a9d1"
-)
+// httpClient 是所有图源共享的 HTTP 客户端。带超时避免图源慢/挂时请求无限阻塞
+// （原来用 http.DefaultClient 无超时，是高频失败/卡顿的主因）。
+var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 type RandomSrv interface {
 	GetRandomPic() (string, error)
@@ -14,21 +16,12 @@ type RandomSrv interface {
 
 var AllRandomPicSrv map[string]RandomSrv = make(map[string]RandomSrv)
 
+// GetRandomPic 按 key 派发到具体图源。失败时如实返回错误（不再吞成 DefaultPics），
+// 由调用方决定兜底与提示（便于把失败原因带进消息）。
 func GetRandomPic(srvType string) (string, error) {
-
 	rsrv, ok := AllRandomPicSrv[srvType]
-
 	if !ok {
-		log.Warnf("AllRandomPicSrv not find %s srvType", srvType)
-		return DefaultPics, nil
+		return "", fmt.Errorf("未知图源: %s", srvType)
 	}
-
-	picUrl, err := rsrv.GetRandomPic()
-
-	if err != nil {
-		log.Warnf("RandomSrv Req PicUrl Fail, err:%+v", err)
-		return DefaultPics, nil
-	}
-
-	return picUrl, nil
+	return rsrv.GetRandomPic()
 }
