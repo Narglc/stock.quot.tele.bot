@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 	// 内嵌 IANA 时区库：保证无系统 tzdata 的精简容器也能 LoadLocation("Asia/Shanghai")
 	_ "time/tzdata"
@@ -123,7 +127,7 @@ func main() {
 		}()
 	}
 
-	schedule.ScheduleTask(b)
+	schedule.ScheduleTask(b, appConfig.Apify.Token)
 
 	// go func() {
 	// 	for {
@@ -143,12 +147,25 @@ func main() {
 		{Text: "/help", Description: "命令说明"},
 	}
 
-	err = b.SetCommands(commands)
-	if err != nil {
+	if err = b.SetCommands(commands); err != nil {
 		log.Fatal(err)
 	}
 
-	b.Start()
+	// 优雅退出：收到 SIGINT/SIGTERM 时停止长轮询、停定时任务、关 redis。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go b.Start()
+	logger.Infof("bot 已启动，等待退出信号…")
+	<-ctx.Done()
+
+	logger.Infof("收到退出信号，优雅关闭…")
+	b.Stop()
+	schedule.StopTasks()
+	if cerr := dao.CloseRdb(); cerr != nil {
+		logger.Warnf("关闭 redis 失败: %v", cerr)
+	}
+	logger.Infof("已退出")
 }
 
 // func initScheduler() *cron.Cron {

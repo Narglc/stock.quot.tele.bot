@@ -32,10 +32,21 @@ func mustLoadBeijing() *time.Location {
 	return loc
 }
 
+// cronRunner 持有当前 cron 实例，供优雅退出时 StopTasks 停止。
+var cronRunner *cron.Cron
+
+// StopTasks 停止所有定时任务（优雅退出用）；等待正在执行的任务结束。
+func StopTasks() {
+	if cronRunner != nil {
+		cronRunner.Stop()
+	}
+}
+
 // ScheduleTask 用 cron（东八区）注册所有定时任务并启动。
 //   - 工作日 TaskList 的每个 HH:MM 各一条提醒任务；
-//   - 每小时整点一次 BTC/ETH 行情播报，并在启动时立即播报一次。
-func ScheduleTask(bot *telebot.Bot) {
+//   - 每小时整点一次 BTC/ETH 行情播报，并在启动时立即播报一次；
+//   - apifyToken 非空时，早八/晚八各一次 BTC 清算图播报。
+func ScheduleTask(bot *telebot.Bot, apifyToken string) {
 	c := cron.New(cron.WithLocation(beijingLoc))
 
 	// 工作日提醒：每个 Task 按 HH:MM 注册一条 cron（周一至周五）。
@@ -59,8 +70,19 @@ func ScheduleTask(bot *telebot.Bot) {
 		log.Warnf("注册 crypto 播报任务失败: %v", err)
 	}
 
+	// 早八/晚八清算图播报（需配置 APIFY_TOKEN）。
+	if apifyToken != "" {
+		for _, spec := range []string{"0 8 * * *", "0 20 * * *"} {
+			s := spec
+			if _, err := c.AddFunc(s, func() { broadcastLiqmap(bot, "BTC", apifyToken) }); err != nil {
+				log.Warnf("注册清算图任务失败 %s: %v", s, err)
+			}
+		}
+	}
+
+	cronRunner = c
 	c.Start()
-	log.Infof("cron 定时任务已启动（时区 %s），共 %d 个提醒 + 每小时行情播报", beijingLoc, len(TaskList))
+	log.Infof("cron 定时任务已启动（时区 %s），共 %d 个提醒 + 每小时行情播报 + 清算图:%v", beijingLoc, len(TaskList), apifyToken != "")
 
 	// 启动后立即播报一次行情，方便验证、避免干等到下一个整点。
 	go broadcastCrypto(bot)

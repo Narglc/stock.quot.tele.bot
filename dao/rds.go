@@ -18,6 +18,9 @@ const (
 	PhotoKey       = "tg:gohome:pics"
 	// GroupKey 保存已 /register 的 chat：Hash field=chatID, value=ChatInfo 的 JSON
 	GroupKey = "tg:gohome:groups"
+	// BroadcastMsgKey 保存各群最近一条整点行情消息 id（Hash field=chatID, value=messageID），
+	// 用于下次整点"原地编辑"该消息，避免每小时刷屏。
+	BroadcastMsgKey = "tg:gohome:bcast"
 
 	// opTimeout 单次 Redis 操作的超时，避免 Redis 卡住拖垮调用方 goroutine。
 	opTimeout = 5 * time.Second
@@ -84,4 +87,33 @@ func RemoveGroup(chatID int64) error {
 	ctx, cancel := opCtx()
 	defer cancel()
 	return rdb.HDel(ctx, GroupKey, strconv.FormatInt(chatID, 10)).Err()
+}
+
+// SaveBroadcastMsg 记录某群最近一条整点行情消息 id（供下次原地编辑）。
+func SaveBroadcastMsg(chatID int64, msgID string) error {
+	ctx, cancel := opCtx()
+	defer cancel()
+	return rdb.HSet(ctx, BroadcastMsgKey, strconv.FormatInt(chatID, 10), msgID).Err()
+}
+
+// GetBroadcastMsg 取某群最近一条整点行情消息 id；不存在返回 redis.Nil 错误。
+func GetBroadcastMsg(chatID int64) (string, error) {
+	ctx, cancel := opCtx()
+	defer cancel()
+	return rdb.HGet(ctx, BroadcastMsgKey, strconv.FormatInt(chatID, 10)).Result()
+}
+
+// DelBroadcastMsg 删除某群的整点行情消息 id 记录（群注销/消息失效时）。
+func DelBroadcastMsg(chatID int64) {
+	ctx, cancel := opCtx()
+	defer cancel()
+	_ = rdb.HDel(ctx, BroadcastMsgKey, strconv.FormatInt(chatID, 10)).Err()
+}
+
+// CloseRdb 关闭 redis 连接（优雅退出时调用）。
+func CloseRdb() error {
+	if rdb != nil {
+		return rdb.Close()
+	}
+	return nil
 }
