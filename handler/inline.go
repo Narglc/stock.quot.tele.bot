@@ -12,6 +12,7 @@ import (
 // InlineQuery 处理 inline 查询（在任意聊天里输入 @bot [币种...]）。
 //   - @bot            —— 默认 BTC/ETH
 //   - @bot btc eth sol —— 指定币种
+//
 // 返回「全部」+ 每个币种各一条结果，用户点选后把对应行情发到当前聊天。
 // 需先在 @BotFather 用 /setinline 为 bot 开启 inline 模式，否则 @bot 不出结果。
 func InlineQuery(c tele.Context) error {

@@ -4,12 +4,12 @@
 
 - **群聊定时提醒**：工作日起床/午饭/下班等（`schedule/`）
 - **随机图片 / 表情包**：`/wakeup` 拉随机图、`/sticker` 随机表情，用户发来的图/表情自动收藏进 Redis
-- **行情播报 + `/price` 即时查询 + inline 查询**：CoinGecko `/coins/markets` 数据（价、1h/24h/7d/30d 涨跌、24h 成交额、距 ATH、市值排名）+ 恐惧贪婪指数（alternative.me）。每小时整点向已注册群播报，`/price [币种...]` 随时查；inline 模式下在任意聊天输入 `@bot [币种...]` 也能查（`stocks/` + `schedule/crypto.go` + `handler/price.go` + `handler/inline.go`）。inline 需在 @BotFather `/setinline` 开启。
-- **MCP 发消息服务**：自己的 agent 可通过 MCP `send_message` 工具发 markdown 消息到 Telegram（`mcpserver/`）
-- **语音播报（TTS）**：MCP `send_voice` 工具把文本转语音后发到 Telegram（`tts/`）；TTS 实现可插拔（Azure / edge-tts），换配置即切换
-- 已注册群持久化到 Redis，重启自动恢复；bot 被踢自动注销
-
-> 股票行情能力（`stocks/`）已有骨架，`main.go` 中尚未接入。
+- **行情播报 + `/price` 即时查询 + inline 查询**：CoinGecko `/coins/markets`（价、1h/24h/7d/30d 涨跌、高低、成交额、距 ATH、市值）+ 恐惧贪婪指数（alternative.me）+ OKX 衍生品（持仓量及变化、多空比、资金费率、持仓/价格组合解读）+ 全市场概览（总市值、BTC.D/ETH.D）。**整点播报采用"原地编辑同一条消息"刷新，不刷屏**；`/price [币种...]` 随时查；inline 输入 `@bot [币种...]` 也能查（需 @BotFather `/setinline` 开启）。
+- **清算图 `/liqmap [币种]`**：拉 CoinAnk 清算热力图，纯 Go 渲染「热力图 + 清算地图」两张 PNG 相册（`stocks/liqmap.go` + `stocks/liqrender.go`）；配 `APIFY_TOKEN` 后还会早八/晚八各定时播报一次 BTC。
+- **娱乐 `/dice`**：Telegram 动画骰子/飞镖/老虎机等。
+- **MCP 发消息服务**：agent 通过 MCP `send_message`（markdown）发消息（`mcpserver/`）。
+- **语音播报（TTS）**：MCP `send_voice`（可带 `caption`）把文本转语音发到 Telegram（`tts/`）；TTS 可插拔（Azure / edge-tts / http 委托本地 worker），换 `TTS_PROVIDER` 即切换。
+- 已注册群、整点消息 id 持久化到 Redis，重启自动恢复；bot 被踢自动注销；SIGINT/SIGTERM 优雅退出。
 
 ## 环境要求
 
@@ -65,6 +65,7 @@ TTS_PROVIDER=azure AZURE_TTS_KEY=<key> AZURE_TTS_REGION=eastasia \
 | `tts.edge.voice` | `EDGE_TTS_VOICE` | edge-tts 声色，默认 `zh-CN-XiaoxiaoNeural` |
 | `tts.http.url` | `TTS_HTTP_URL` | 委托外部 HTTP TTS（provider=http 时），如本地 worker 经 ssh -R 映射的 `http://127.0.0.1:5000/tts` |
 | `tts.http.token` | `TTS_HTTP_TOKEN` | 与 worker 约定的共享密钥（可空） |
+| `apify.token` | `APIFY_TOKEN` | 清算图（/liqmap 与早八晚八 cron）数据源，留空则不可用 |
 
 ## MCP 发消息服务
 
