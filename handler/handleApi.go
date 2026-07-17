@@ -7,7 +7,7 @@ import (
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
-	_ "image/png"
+	"image/png"
 	"io"
 	"net/http"
 	"path"
@@ -19,6 +19,7 @@ import (
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 	"github.com/narglc/stock.quot.tele.bot/schedule"
 	"github.com/narglc/stock.quot.tele.bot/utils"
+	"golang.org/x/image/webp"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -153,7 +154,8 @@ func OnPhoto(c tele.Context) error {
 }
 
 // picCandidates 是参与随机的图源名单；新增图源在此登记即可参与。
-var picCandidates = []string{"lolicon", "sexnyan", "nekos", "waifu", "picre"}
+// 注：sexnyan 因 TLS/SNI 证书错误（tlsv1 unrecognized name）已不可用，暂移出轮询。
+var picCandidates = []string{"lolicon", "nekos", "waifu", "picre"}
 
 // getRandomPicSrc 按各源近期成功率加权选一个（老失败的源自动降权）。
 func getRandomPicSrc() string {
@@ -284,6 +286,10 @@ func fetchPic(url string) (*fetchedPic, error) {
 		return nil, errPicTooLarge
 	}
 
+	// 不少图源（pic.re / nekosapi / waifu.pics）返回 webp，而 Telegram sendPhoto 不吃 webp。
+	// 转成 PNG 再走后续判级/发送，避免发失败或被降级成文件。
+	data = webpToPNG(data)
+
 	asPhoto := len(data) <= maxPhotoBytes
 	// 只解析图片头拿尺寸，宽 + 高 超限则改走文件发送
 	if asPhoto {
@@ -295,6 +301,25 @@ func fetchPic(url string) (*fetchedPic, error) {
 	}
 
 	return &fetchedPic{data: data, asPhoto: asPhoto}, nil
+}
+
+// webpToPNG 若 data 是 webp（RIFF....WEBP 魔数），解码后重新编码为 PNG 返回；
+// 非 webp 或解码失败则原样返回（让下游按原格式处理/降级）。
+func webpToPNG(data []byte) []byte {
+	if len(data) < 12 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		return data
+	}
+	img, err := webp.Decode(bytes.NewReader(data))
+	if err != nil {
+		log.Warnf("webp 解码失败，按原格式处理: %v", err)
+		return data
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		log.Warnf("webp 转 PNG 失败，按原格式处理: %v", err)
+		return data
+	}
+	return buf.Bytes()
 }
 
 // picFileName 从 URL 推断文件名（含扩展名），供 Document 发送时正确识别图片类型。
