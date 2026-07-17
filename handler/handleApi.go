@@ -9,7 +9,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"math/rand"
 	"net/http"
 	"path"
 	"strings"
@@ -152,17 +151,12 @@ func OnPhoto(c tele.Context) error {
 	return nil
 }
 
+// picCandidates 是参与随机的图源名单；新增图源在此登记即可参与。
+var picCandidates = []string{"lolicon", "sexnyan", "nekos", "waifu"}
+
+// getRandomPicSrc 按各源近期成功率加权选一个（老失败的源自动降权）。
 func getRandomPicSrc() string {
-	picSrc := []string{
-		"lolicon",
-		"sexnyan",
-		"nekos",
-	}
-
-	seed := time.Now().UnixNano()                                    // rand内部运算的随机数
-	idx := rand.New(rand.NewSource(seed)).Int31n(int32(len(picSrc))) // rand计算得到的随机数
-
-	return picSrc[idx]
+	return randompic.WeightedPick(picCandidates)
 }
 
 func Wakeup(c tele.Context) error {
@@ -190,20 +184,24 @@ func Wakeup(c tele.Context) error {
 		url, gerr := randompic.GetRandomPic(src)
 		if gerr != nil {
 			lastErr = gerr
+			randompic.Record(src, false)
 			log.Warnf("图源[%s]第%d次取图失败: %v", src, i+1, gerr)
 			continue
 		}
 		if url == "" {
 			lastErr = fmt.Errorf("图源[%s]返回空 url", src)
+			randompic.Record(src, false)
 			continue
 		}
 
 		p, verr := fetchPic(url)
 		if verr != nil {
 			lastErr = fmt.Errorf("下载图片失败(%s): %w", src, verr)
+			randompic.Record(src, false)
 			log.Warnf("图源[%s]第%d次取图不可用: url=%s err=%v", src, i+1, url, verr)
 			continue
 		}
+		randompic.Record(src, true)
 		pic, picUrl = p, url
 		break
 	}
