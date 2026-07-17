@@ -176,7 +176,8 @@ func Wakeup(c tele.Context) error {
 	var (
 		pic     *fetchedPic
 		picUrl  string
-		lastErr error // 最后一次失败原因，兜底时带进消息
+		picSrc  string // 实际取图成功的图源名，用于 caption 标注
+		lastErr error  // 最后一次失败原因，兜底时带进消息
 	)
 	for i := 0; i < maxPicRetry; i++ {
 		src := payload
@@ -205,7 +206,7 @@ func Wakeup(c tele.Context) error {
 			continue
 		}
 		randompic.Record(src, true)
-		pic, picUrl = p, url
+		pic, picUrl, picSrc = p, url, src
 		break
 	}
 
@@ -224,19 +225,19 @@ func Wakeup(c tele.Context) error {
 
 	// 尺寸/体积超过内联图片限制的，直接走文件发送
 	if !pic.asPhoto {
-		return sendAsDocument(c, chat, picUrl, pic.data)
+		return sendAsDocument(c, chat, picSrc, picUrl, pic.data)
 	}
 
 	photo := &tele.Photo{
 		File:    tele.FromReader(bytes.NewReader(pic.data)),
-		Caption: "大师助你提神醒脑",
+		Caption: fmt.Sprintf("大师助你提神醒脑\n图源：%s", picSrc),
 	}
 
 	msg, err := c.Bot().Send(chat, photo)
 	if err != nil {
 		// 内联图片发送失败（可能被 Telegram 判定尺寸/比例不合规），兜底转文件发送
 		log.Warnf("Send %s as photo fail, 转文件重发, err:%+v", picUrl, err)
-		return sendAsDocument(c, chat, picUrl, pic.data)
+		return sendAsDocument(c, chat, picSrc, picUrl, pic.data)
 	}
 	// 图片存储到redis
 	dao.SavePhotos(msg.Photo.File.FileID)
@@ -245,11 +246,11 @@ func Wakeup(c tele.Context) error {
 }
 
 // sendAsDocument 把图片作为文件(Document)发送，保留原图画质、绕过 sendPhoto 的尺寸限制。
-func sendAsDocument(c tele.Context, chat tele.Recipient, url string, data []byte) error {
+func sendAsDocument(c tele.Context, chat tele.Recipient, src, url string, data []byte) error {
 	doc := &tele.Document{
 		File:     tele.FromReader(bytes.NewReader(data)),
 		FileName: picFileName(url),
-		Caption:  "大师助你提神醒脑（原图较大，以文件发送）",
+		Caption:  fmt.Sprintf("大师助你提神醒脑（原图较大，以文件发送）\n图源：%s", src),
 	}
 	if _, err := c.Bot().Send(chat, doc); err != nil {
 		log.Warnf("Send %s as document fail, err:%+v", url, err)
