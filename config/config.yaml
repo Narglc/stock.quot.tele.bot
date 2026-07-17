@@ -20,6 +20,9 @@ tts:
     token: ""                       # TTS_HTTP_TOKEN，与 worker 约定的共享密钥（可空）
 apify:
   token: ""                         # APIFY_TOKEN，清算图(/liqmap)数据源，留空则 /liqmap 不可用
+image:                              # /gen 生图 worker（本地 GPU，经 Tailscale/隧道暴露）
+  url: ""                           # IMAGE_URL，如 http://100.x.x.x:5001/gen；留空则 /gen 不可用
+  token: ""                         # IMAGE_TOKEN，与 worker 约定的共享密钥（可空）
 logger:
   level: "debug"
   logPath: "logs/tele.bog.log"

@@ -49,12 +49,19 @@ type ApifyConfig struct {
 	Token string `mapstructure:"token"`
 }
 
+// ImageConfig：/gen 生图 worker 的 HTTP 端点（本地 GPU worker，经 Tailscale/隧道暴露）。
+type ImageConfig struct {
+	URL   string `mapstructure:"url"`
+	Token string `mapstructure:"token"`
+}
+
 type Config struct {
 	Telegram TelegramConfig `mapstructure:"telegram"`
 	Redis    RedisConfig    `mapstructure:"redis"`
 	MCP      MCPConfig      `mapstructure:"mcp"`
 	TTS      TTSConfig      `mapstructure:"tts"`
 	Apify    ApifyConfig    `mapstructure:"apify"`
+	Image    ImageConfig    `mapstructure:"image"`
 	// 日志
 	LoggerConfig logger.LoggerConfig `json:"logger" mapstructure:"logger"`
 }
@@ -88,6 +95,8 @@ func InitConfig(configPath string) (*Config, bool) {
 	_ = viper.BindEnv("tts.http.voice", "TTS_HTTP_VOICE")
 	_ = viper.BindEnv("tts.http.token", "TTS_HTTP_TOKEN")
 	_ = viper.BindEnv("apify.token", "APIFY_TOKEN")
+	_ = viper.BindEnv("image.url", "IMAGE_URL")
+	_ = viper.BindEnv("image.token", "IMAGE_TOKEN")
 
 	if err := viper.ReadInConfig(); err != nil {
 		fmt.Printf("config file %s read failed. %v\n", configPath, err)

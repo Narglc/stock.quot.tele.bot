@@ -25,6 +25,7 @@ const helpText = `🤖 大师使用说明
 
 🎲 娱乐
 /dice [类型]   掷动画骰子，默认 🎲；可选 飞镖/篮球/足球/老虎机/保龄球
+/gen <描述>    AI 生图（本地 GPU），例：/gen a cyberpunk city at night
 （你发给我的图片/表情会被自动收藏进库当贡品）
 
 ℹ️ 其它
