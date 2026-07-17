@@ -85,13 +85,48 @@ GET https://picsum.photos/800/600        # 302 跳转到具体图片
 
 ---
 
-## 与代码的关联（已按验证结果落地）
-- `domain/randompic/` 现有实现：`lolicon`(✅) / `sexnyan`(⚠️ 待复验) / `nekos`(✅ 新增，nekos.best)。
-  - 已删除失效的 `lolimi.go`。
-- `handler/handleApi.go: getRandomPicSrc()` 随机名单已更新为 `["lolicon","sexnyan","nekos"]`。
-- `Wakeup` 发送前会 `fetchSendablePhoto()` 预校验：**体积 > 10MB 或 宽+高 > 10000 的图直接跳过换下一张**
-  （最多重试 3 次，都不合适则回落默认表情），从根本上避免「图图太大」发送失败。
-- 新增图源的接入方式见 `domain/randompic/common.go`（接口 + `init()` 自注册到 `AllRandomPicSrv`）。
+---
+
+## 补充校准（2026-07-18，端到端实测：取图→转PNG→真发 sendPhoto）
+
+以下为**当前实际接入**的源，均已跑通完整链路（含 Telegram 收图验证）：
+
+### elvish（pic.elvish.me，EdgeOne Pages 随机图）
+```
+GET https://pic.elvish.me/api/?type=pc   # 302 → /images/pc/xxx.webp（横屏 webp）
+```
+- `type` 可选 `pc`(横屏)/`pe`(竖屏)/`ua`(按 UA 自适应)。端点只返 **302**，`elvish.go` 用不跟随重定向的 client 取 `Location` 拿真实图片 url。返回 **webp**（经 `webpToPNG` 转 PNG）。
+
+### elaina（api.elaina.cat，随机横/竖屏图）
+```
+GET https://api.elaina.cat/random/pc/    # 直接返回 JPEG（末尾斜杠避免 301）
+```
+- `/random/pc/`(横屏) / `/random/mobile`(竖屏)。直图端点，`elaina.go` 直接当 url 返回。JPEG。
+
+### dmoe（www.dmoe.cc，樱花随机二次元）
+```
+GET https://www.dmoe.cc/random.php       # 直接返回 JPEG；?return=json 可拿 url
+```
+- 直图端点，`dmoe.go` 直接当 url 返回。JPEG。
+
+### nekos（已从 nekos.best 换成 nekosapi.com v4）
+```
+GET https://api.nekosapi.com/v4/images/random?limit=1   # JSON 数组，取 arr[0].url（webp）
+```
+- 加 `&rating=explicit` 可要 nsfw。返回 **webp**（经 `webpToPNG` 转 PNG）。
+
+### 其它在用
+- `picre`(pic.re/image，webp 直图)、`waifu`(api.waifu.pics/nsfw/waifu，webp)。
+
+---
+
+## 与代码的关联（当前状态）
+- `domain/randompic/` 现有实现：`lolicon.go`(✅ POST setu) / `nekosapi.go`(✅) / `waifupics.go`(✅) / `picre.go`(✅) / `elvish.go`(✅) / `elaina.go`(✅) / `dmoe.go`(✅)。
+  - 已删除：`lolimi.go`（失效）、`sexnyan.go`（TLS `tlsv1 unrecognized name`）、`nekosbest.go`（被 nekosapi 取代）。
+- `handler/handleApi.go: picCandidates` 随机名单：`["lolicon","nekos","waifu","picre","elvish","elaina","dmoe"]`。选源用 `randompic.WeightedPick`（成功率加权）；发图 caption 标注实际命中的图源。
+- **webp 处理**：pic.re / nekosapi / waifu.pics / elvish 返回 webp，Telegram sendPhoto 不吃 webp，`fetchPic` 下载后统一走 `webpToPNG` 转 PNG。
+- `fetchPic` 预校验：**体积 > 10MB 或 宽+高 > 10000** 的图改走 Document 文件发送；连 50MB 都超才跳过换下一张（最多重试 3 次，都不合适则回落默认 sticker 并带上失败原因）。
+- 新增图源接入方式见 `domain/randompic/common.go`（接口 + `init()` 自注册到 `AllRandomPicSrv`）。
 
 ---
 

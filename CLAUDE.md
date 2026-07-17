@@ -47,9 +47,9 @@ go mod tidy
 1. 实现 `RandomSrv` 接口（`GetRandomPic() (string, error)`，见 `common.go`）。
 2. 用 `sync.Once` 提供单例构造函数。
 3. 在该文件的 `init()` 里 `AllRandomPicSrv["<名字>"] = Get<Name>Clt()` 自注册到全局 map。
-4. 调用方通过 `randompic.GetRandomPic("<名字>")` 按 key 派发；任何失败都降级返回 `DefaultPics` 兜底 URL，不向上抛错。
+4. 调用方通过 `randompic.GetRandomPic("<名字>")` 按 key 派发；**失败如实上抛错误**（不再吞成默认图），由 `Wakeup` 兜底（回落默认 sticker）并把原因带进消息。
 
-同时注意：`handler/handleApi.go:picCandidates` 是参与随机的图源名单（`lolicon`/`sexnyan`/`nekos`/`waifu`），新增图源若要参与随机需同步这里。选源用 `randompic.WeightedPick`（按成功率加权，见 `stats.go`；`Wakeup` 每次取图后 `randompic.Record`）。现有实现：`lolicon.go`、`sexnyan.go`、`nekosbest.go`、`waifupics.go`。取图失败会如实上抛错误（不再吞成默认图），`Wakeup` 兜底时把原因带进消息。
+同时注意：`handler/handleApi.go:picCandidates` 是参与随机的图源名单（`lolicon`/`nekos`/`waifu`/`picre`/`elvish`/`elaina`/`dmoe`），新增图源若要参与随机需同步这里。选源用 `randompic.WeightedPick`（按成功率加权，见 `stats.go`；`Wakeup` 每次取图后 `randompic.Record`），发图 caption 会标注**实际命中的图源名**。现有实现：`lolicon.go`（POST setu API）、`nekosapi.go`（nekosapi.com v4，JSON 数组取首 url）、`waifupics.go`、`picre.go`（直图端点）、`elvish.go`（pic.elvish.me，解析 302 拿真实图片 url）、`elaina.go`（api.elaina.cat 直图）、`dmoe.go`（dmoe.cc 樱花 API 直图）。**注意**：不少源（pic.re/nekosapi/waifu.pics/elvish）返回 **webp**，而 Telegram sendPhoto 不吃 webp，故 `fetchPic` 下载后经 `webpToPNG` 统一转 PNG 再发。已移除的源：`sexnyan`（TLS/SNI 证书错误 `tlsv1 unrecognized name`）、`nekosbest`（被 nekosapi 取代）。
 
 ### 定时提醒 + 行情播报（schedule/）
 `ScheduleTask` 用 `robfig/cron/v3` 统一调度，时区固定为**东八区 `Asia/Shanghai`**（`schedule.go:beijingLoc`；`main.go` 内嵌 `time/tzdata` 保证精简容器也能加载）：

@@ -155,7 +155,7 @@ func OnPhoto(c tele.Context) error {
 
 // picCandidates 是参与随机的图源名单；新增图源在此登记即可参与。
 // 注：sexnyan 因 TLS/SNI 证书错误（tlsv1 unrecognized name）已不可用，暂移出轮询。
-var picCandidates = []string{"lolicon", "nekos", "waifu", "picre", "elvish"}
+var picCandidates = []string{"lolicon", "nekos", "waifu", "picre", "elvish", "elaina", "dmoe"}
 
 // getRandomPicSrc 按各源近期成功率加权选一个（老失败的源自动降权）。
 func getRandomPicSrc() string {
