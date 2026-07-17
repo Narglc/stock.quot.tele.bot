@@ -103,10 +103,11 @@ func OnText(c tele.Context) error {
 
 	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v", user.ID, user.FirstName, chat.ID, chat.Title, text)
 
-	_, err := c.Bot().Send(user, text)
-	if err != nil {
-		return err
-	}
+	// 复读机行为先注释掉（保留 handler，便于以后接入有意义的响应）。
+	// _, err := c.Bot().Send(user, text)
+	// if err != nil {
+	// 	return err
+	// }
 
 	return nil
 }
@@ -152,7 +153,7 @@ func OnPhoto(c tele.Context) error {
 }
 
 // picCandidates 是参与随机的图源名单；新增图源在此登记即可参与。
-var picCandidates = []string{"lolicon", "sexnyan", "nekos", "waifu"}
+var picCandidates = []string{"lolicon", "sexnyan", "nekos", "waifu", "picre"}
 
 // getRandomPicSrc 按各源近期成功率加权选一个（老失败的源自动降权）。
 func getRandomPicSrc() string {

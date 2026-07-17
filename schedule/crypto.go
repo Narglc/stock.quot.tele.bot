@@ -2,7 +2,6 @@ package schedule
 
 import (
 	"strconv"
-	"strings"
 
 	"github.com/narglc/stock.quot.tele.bot/dao"
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
@@ -11,7 +10,8 @@ import (
 )
 
 // broadcastCrypto 播报一次 BTC/ETH 行情（cron 每小时整点触发 + 启动时立即一次）。
-// 采用"原地编辑同一条消息"而非每次新发，避免每小时刷屏。
+// 采用"删掉上一条 + 静音发新"：群里始终只有一条、且在最底部方便一眼看到，
+// 既不像每次新发那样刷屏堆积，也不像原地编辑那样被埋在历史里看不到。
 func broadcastCrypto(bot *telebot.Bot) {
 	if GroupCount() == 0 {
 		return
@@ -31,25 +31,20 @@ func broadcastCrypto(bot *telebot.Bot) {
 	}
 
 	for _, id := range SnapshotGroupIDs() {
-		editOrSendBroadcast(bot, id, msg)
+		pushFreshBroadcast(bot, id, msg)
 	}
 	log.Infof("crypto 播报完成")
 }
 
-// editOrSendBroadcast 优先原地编辑上次那条整点行情消息；无记录/编辑失败则新发并记录 id。
-func editOrSendBroadcast(bot *telebot.Bot, chatID int64, msg string) {
+// pushFreshBroadcast 删掉上一条整点行情（若有），再静音发一条新的并记录 id。
+// 效果：群里任意时刻只有一条行情、且始终在最底部；静音发送不刷通知。
+func pushFreshBroadcast(bot *telebot.Bot, chatID int64, msg string) {
 	if mid, err := dao.GetBroadcastMsg(chatID); err == nil && mid != "" {
-		stored := &telebot.StoredMessage{MessageID: mid, ChatID: chatID}
-		if _, eerr := bot.Edit(stored, msg); eerr == nil {
-			return // 原地更新成功，不产生新通知、不刷屏
-		} else if strings.Contains(eerr.Error(), "not modified") {
-			return // 内容与上次一致，也算成功
-		} else {
-			log.Warnf("整点行情编辑失败 group:%d msg:%s err:%v，改为新发", chatID, mid, eerr)
-		}
+		// 删旧失败忽略（可能已被用户删/太旧），不影响发新。
+		_ = bot.Delete(&telebot.StoredMessage{MessageID: mid, ChatID: chatID})
 	}
 
-	sent, err := bot.Send(telebot.ChatID(chatID), msg)
+	sent, err := bot.Send(telebot.ChatID(chatID), msg, telebot.Silent)
 	if err != nil {
 		log.Warnf("整点行情发送失败 group:%d err:%v", chatID, err)
 		if IsBotEvicted(err) {
