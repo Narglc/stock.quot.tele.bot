@@ -1,0 +1,3 @@
+# ComfyUI 运行时目录：模型检查点/LoRA/输出图片，体积大且各人不同，勿入库
+models/
+output/
