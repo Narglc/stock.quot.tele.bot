@@ -6,7 +6,6 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -97,8 +96,7 @@ func RenderLiqHeatmapPNG(h *LiqHeatmap) ([]byte, error) {
 			if v := row[xi]; v > 0 {
 				x0 := mL + int(float64(xi)/float64(T)*float64(plotW))
 				x1 := mL + int(float64(xi+1)/float64(T)*float64(plotW))
-				// gamma(√) 提亮暗区：早期/小值也能显出结构，同时不改变大小顺序。
-				fillRect(img, x0, yTop, x1, yBot, heatColor(math.Sqrt(v/maxV)))
+				fillRect(img, x0, yTop, x1, yBot, heatColor(v/maxV))
 			}
 		}
 	}
