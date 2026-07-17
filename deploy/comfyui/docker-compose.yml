@@ -1,0 +1,37 @@
+# ComfyUI（生图，吃 GPU）+ adapter（把 bot /gen 的 {prompt} 翻译成 ComfyUI 工作流）
+# 跑在本地这台 GPU 机器上，和 ollama 并存（共用同一块卡，注意显存）。
+# 前置：宿主装好 NVIDIA 驱动 + nvidia-container-toolkit（docker 能用 --gpus）。
+# 用法：把 SDXL 检查点放到 ./models/checkpoints/，然后 docker compose up -d --build
+
+services:
+  comfyui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./models:/app/models     # 检查点放 ./models/checkpoints/，LoRA 放 ./models/loras/
+      - ./output:/app/output
+    # ports: ["8188:8188"]       # 需要 ComfyUI 网页调试时再开
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  adapter:
+    build:
+      context: .
+      dockerfile: Dockerfile.adapter
+    restart: unless-stopped
+    environment:
+      COMFY_URL: http://comfyui:8188
+      CKPT: sd_xl_base_1.0.safetensors   # 改成你放进 models/checkpoints 的实际文件名
+      STEPS: "25"
+      # IMG_TOKEN: "与 bot 的 IMAGE_TOKEN 一致（可选）"
+    ports:
+      - "5001:5001"   # bot 经隧道访问这个 → IMAGE_URL=http://<本机隧道IP>:5001/gen
+    depends_on:
+      - comfyui
