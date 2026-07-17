@@ -2,6 +2,10 @@
 
 本地 GPU 出图，bot 只发提示词收图。适配 **RTX 3060 12GB**（也可其它卡）。
 
+> **`serve.py` 是完整独立的生图器（用 diffusers 直接出图），不是转发、不需要 ComfyUI。**
+> HTTP 进 → diffusers 生成 → PNG 出。**ComfyUI 是"另一条路"**（功能更全的替代后端），
+> 用它就不用 serve.py，改让 bot 调 ComfyUI 的 API。简单 `/gen` 用 `serve.py` 就够。
+
 ```
 [本地 GPU] serve.py :5001  ← diffusers(SDXL / FLUX) 生成 PNG
    │  Tailscale（推荐）或 ssh -R
@@ -32,21 +36,10 @@ curl -X POST http://127.0.0.1:5001/gen -H 'Content-Type: application/json' \
   -d '{"prompt":"a cyberpunk city at night, neon, rain"}' -o t.png && ls -l t.png
 ```
 
-## 3. 暴露给 VPS（二选一）
+## 3. 暴露给 VPS
 
-**Tailscale（推荐，掉线自愈、无 Broken pipe）**：
-```bash
-curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up   # 本机 + VPS 各跑一次
-tailscale ip -4        # 记下本机 100.x.x.x
-```
-VPS 的 `bot.env`：`IMAGE_URL=http://<本机100.x>:5001/gen`
-
-**ssh -R（备选）**：
-```bash
-autossh -M 0 -N -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes \
-  -R 0.0.0.0:5001:127.0.0.1:5001 root@<vps>
-```
-（docker 下还需 sshd `GatewayPorts clientspecified` + compose `extra_hosts: host.docker.internal:host-gateway`，见 ../tts-worker/README.md）
+三种方式（**裸 WireGuard 推荐** / Tailscale / ssh -R）详见 [`../remote-access.md`](../remote-access.md)。
+打通后 VPS 的 `bot.env` 填本机隧道 IP，例如 WireGuard：`IMAGE_URL=http://10.8.0.2:5001/gen`。
 
 ## 4. bot 用法
 配好 `IMAGE_URL` 重启 bot，发 `/gen a red panda astronaut, watercolor` 即可。

@@ -26,7 +26,13 @@ curl -X POST http://127.0.0.1:5000/tts \
   -d '{"text":"测试","voice":"zh-CN-XiaoyiNeural"}' -o t.ogg && ffprobe t.ogg
 ```
 
-## 2. 反向隧道（本地执行，把本地 5000 映到 VPS 回环 5000）
+## 2. 打通本地 → VPS
+
+> **推荐用裸 WireGuard 或 Tailscale**（掉线自愈、无 `Broken pipe`），三种方式详见
+> [`../remote-access.md`](../remote-access.md)。WireGuard 下 `TTS_HTTP_URL=http://10.8.0.2:5000/tts`。
+> 下面的 ssh -R 为应急方式（长时间易断，需配 autossh + keepalive）。
+
+### （应急）反向隧道 ssh -R（本地执行，把本地 5000 映到 VPS 回环 5000）
 
 ```bash
 # 推荐 autossh 常驻自愈；无 autossh 用 ssh -N -R 亦可

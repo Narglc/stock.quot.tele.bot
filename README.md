@@ -7,6 +7,7 @@
 - **行情播报 + `/price` 即时查询 + inline 查询**：CoinGecko `/coins/markets`（价、1h/24h/7d/30d 涨跌、高低、成交额、距 ATH、市值）+ 恐惧贪婪指数（alternative.me）+ OKX 衍生品（持仓量及变化、多空比、资金费率、持仓/价格组合解读）+ 全市场概览（总市值、BTC.D/ETH.D）。**整点播报采用"原地编辑同一条消息"刷新，不刷屏**；`/price [币种...]` 随时查；inline 输入 `@bot [币种...]` 也能查（需 @BotFather `/setinline` 开启）。
 - **清算图 `/liqmap [币种]`**：拉 CoinAnk 清算热力图，纯 Go 渲染「热力图 + 清算地图」两张 PNG 相册（`stocks/liqmap.go` + `stocks/liqrender.go`）；配 `APIFY_TOKEN` 后还会早八/晚八各定时播报一次 BTC。
 - **娱乐 `/dice`**：Telegram 动画骰子/飞镖/老虎机等。
+- **AI 生图 `/gen <描述>`**：本地 GPU worker（diffusers，SDXL/FLUX，支持 LoRA）出图，bot 只发提示词收图（`handler/gen.go` + `deploy/image-worker/`）。本地→VPS 打通见 [`deploy/remote-access.md`](deploy/remote-access.md)。
 - **MCP 发消息服务**：agent 通过 MCP `send_message`（markdown）发消息（`mcpserver/`）。
 - **语音播报（TTS）**：MCP `send_voice`（可带 `caption`）把文本转语音发到 Telegram（`tts/`）；TTS 可插拔（Azure / edge-tts / http 委托本地 worker），换 `TTS_PROVIDER` 即切换。
 - 已注册群、整点消息 id 持久化到 Redis，重启自动恢复；bot 被踢自动注销；SIGINT/SIGTERM 优雅退出。
@@ -66,6 +67,8 @@ TTS_PROVIDER=azure AZURE_TTS_KEY=<key> AZURE_TTS_REGION=eastasia \
 | `tts.http.url` | `TTS_HTTP_URL` | 委托外部 HTTP TTS（provider=http 时），如本地 worker 经 ssh -R 映射的 `http://127.0.0.1:5000/tts` |
 | `tts.http.token` | `TTS_HTTP_TOKEN` | 与 worker 约定的共享密钥（可空） |
 | `apify.token` | `APIFY_TOKEN` | 清算图（/liqmap 与早八晚八 cron）数据源，留空则不可用 |
+| `image.url` | `IMAGE_URL` | /gen 生图 worker 端点（本地 GPU，经 WireGuard/Tailscale 暴露，如 `http://10.8.0.2:5001/gen`）；留空则 /gen 不可用 |
+| `image.token` | `IMAGE_TOKEN` | 与生图 worker 约定的共享密钥（可空） |
 
 ## MCP 发消息服务
 
