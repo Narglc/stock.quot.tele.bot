@@ -70,9 +70,13 @@ type CryptoQuote struct {
 	ATHChangePct  float64 // 距历史最高点涨跌幅（通常为负，越接近 0 越接近历史高点）
 	MarketCapRank int     // 市值排名
 
-	// 衍生品指标（Binance 永续，best-effort；0 = 未取到，展示时省略）。
+	// 衍生品指标（OKX 永续，best-effort；0 = 未取到，展示时省略）。
 	OpenInterestUSD float64 // 未平仓合约名义价值（USD）
 	LongShortRatio  float64 // 全市场多空账户比，>1 偏多
+	FundingRate     float64 // 资金费率（如 0.0001=0.01%），正=多头付费
+	FundingKnown    bool    // 是否取到资金费率
+	OIChangePct     float64 // 持仓量相比上次观测的变化百分比
+	OIChangeKnown   bool    // 是否有上次观测可比
 }
 
 // coingeckoMarket 对应 /coins/markets 接口的单条返回（只取用得到的字段）。
@@ -156,6 +160,10 @@ func enrichDerivatives(quotes []CryptoQuote) {
 			if d := fetchDerivatives(quotes[i].Name, quotes[i].Price); d != nil {
 				quotes[i].OpenInterestUSD = d.OpenInterestUSD
 				quotes[i].LongShortRatio = d.LongShortRatio
+				quotes[i].FundingRate = d.FundingRate
+				quotes[i].FundingKnown = d.FundingKnown
+				quotes[i].OIChangePct = d.OIChangePct
+				quotes[i].OIChangeKnown = d.OIChangeKnown
 			}
 		}(i)
 	}
@@ -241,22 +249,58 @@ func FormatCryptoMessage(quotes []CryptoQuote, fng *FearGreed) string {
 			b.WriteString(fmt.Sprintf("   量 $%s\n", formatCompact(q.Volume24h)))
 		}
 		b.WriteString(fmt.Sprintf("   市值 $%s · 距ATH %s · #%d\n", formatCompact(q.MarketCap), pct(q.ATHChangePct), q.MarketCapRank))
-		// 衍生品行仅在取到数据时出现（Binance 被地区限制则整行省略）。
-		if q.OpenInterestUSD > 0 || q.LongShortRatio > 0 {
-			parts := make([]string, 0, 2)
-			if q.OpenInterestUSD > 0 {
-				parts = append(parts, "持仓 $"+formatCompact(q.OpenInterestUSD))
+		// 衍生品行仅在取到数据时出现（OKX 不可达则整行省略）。
+		parts := make([]string, 0, 3)
+		if q.OpenInterestUSD > 0 {
+			oi := "持仓 $" + formatCompact(q.OpenInterestUSD)
+			if q.OIChangeKnown {
+				oi += fmt.Sprintf("(%+.1f%%)", q.OIChangePct)
 			}
-			if q.LongShortRatio > 0 {
-				parts = append(parts, fmt.Sprintf("多空比 %.2f", q.LongShortRatio))
+			parts = append(parts, oi)
+		}
+		if q.LongShortRatio > 0 {
+			parts = append(parts, fmt.Sprintf("多空比 %.2f", q.LongShortRatio))
+		}
+		if q.FundingKnown {
+			fr := fmt.Sprintf("费率 %+.4f%%", q.FundingRate*100)
+			if q.FundingRate > 0 {
+				fr += "(多头付费)"
+			} else if q.FundingRate < 0 {
+				fr += "(空头付费)"
 			}
+			parts = append(parts, fr)
+		}
+		if len(parts) > 0 {
 			b.WriteString("   " + strings.Join(parts, " · ") + "\n")
+		}
+		// 持仓变化 + 价格方向的组合解读（有明显变化时给一句）。
+		if q.OIChangeKnown && q.OpenInterestUSD > 0 {
+			if s := oiInsight(q.Change1h, q.OIChangePct); s != "" {
+				b.WriteString("   " + s + "\n")
+			}
 		}
 	}
 	if fng != nil {
 		b.WriteString(fmt.Sprintf("\n%s 恐惧贪婪指数 %d · %s", fng.Emoji(), fng.Value, fng.LabelCN()))
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// oiInsight 按"价格方向 + 持仓变化"给一句解读。变化太小（<0.5%）不解读，避免噪声。
+func oiInsight(priceChg, oiChg float64) string {
+	if math.Abs(oiChg) < 0.5 {
+		return ""
+	}
+	switch {
+	case priceChg >= 0 && oiChg > 0:
+		return "↗ 增仓上涨：新多进场，趋势偏健康"
+	case priceChg >= 0 && oiChg < 0:
+		return "↗ 减仓上涨：空头回补，追高需谨慎"
+	case priceChg < 0 && oiChg > 0:
+		return "↘ 增仓下跌：空头进场施压"
+	default:
+		return "↘ 减仓下跌：多头离场"
+	}
 }
 
 // arrow 按涨跌返回箭头 emoji。

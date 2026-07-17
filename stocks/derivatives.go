@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
@@ -18,10 +19,20 @@ import (
 type Derivatives struct {
 	OpenInterestUSD float64 // 未平仓名义价值（USD）
 	LongShortRatio  float64 // 全市场多空账户比，>1 偏多
+	FundingRate     float64 // 资金费率（如 0.0001=0.01%），正=多头付费
+	FundingKnown    bool    // 是否取到资金费率
+	OIChangePct     float64 // 相比上次观测的持仓量变化百分比
+	OIChangeKnown   bool    // 是否有上次观测可比
 }
 
 // derivClient 衍生品接口用较短超时：拿不到数据时不拖慢行情主体。
 var derivClient = &http.Client{Timeout: 6 * time.Second}
+
+// lastOI 记录各币种上一次观测到的持仓量，用于算持仓变化（进程内，重启后重新累积）。
+var (
+	lastOIMu sync.Mutex
+	lastOI   = map[string]float64{}
+)
 
 // fetchDerivatives 拉取某币种永续合约的持仓量与多空比。
 // symbol 形如 "BTC"，内部拼成 OKX 的 instId "BTC-USDT-SWAP" / ccy "BTC"。
@@ -35,6 +46,14 @@ func fetchDerivatives(symbol string, _ float64) *Derivatives {
 		log.Warnf("持仓量获取失败 %s: %v", ccy, err)
 	} else {
 		d.OpenInterestUSD = oi
+		// 与上次观测比较，算持仓变化百分比。
+		lastOIMu.Lock()
+		if prev, ok := lastOI[ccy]; ok && prev > 0 {
+			d.OIChangePct = (oi - prev) / prev * 100
+			d.OIChangeKnown = true
+		}
+		lastOI[ccy] = oi
+		lastOIMu.Unlock()
 		got = true
 	}
 
@@ -45,10 +64,33 @@ func fetchDerivatives(symbol string, _ float64) *Derivatives {
 		got = true
 	}
 
+	if fr, err := fetchFundingRate(ccy); err != nil {
+		log.Warnf("资金费率获取失败 %s: %v", ccy, err)
+	} else {
+		d.FundingRate = fr
+		d.FundingKnown = true
+		got = true
+	}
+
 	if !got {
 		return nil
 	}
 	return d
+}
+
+// fetchFundingRate 拉取某永续合约当前资金费率（如 0.0001 表示 0.01%）。
+func fetchFundingRate(ccy string) (float64, error) {
+	var env okxEnvelope[[]struct {
+		FundingRate string `json:"fundingRate"`
+	}]
+	url := "https://www.okx.com/api/v5/public/funding-rate?instId=" + ccy + "-USDT-SWAP"
+	if err := getJSON(url, &env); err != nil {
+		return 0, err
+	}
+	if env.Code != "0" || len(env.Data) == 0 {
+		return 0, fmt.Errorf("okx funding code=%s msg=%q", env.Code, env.Msg)
+	}
+	return strconv.ParseFloat(env.Data[0].FundingRate, 64)
 }
 
 // okxEnvelope 是 OKX v5 接口的统一外层：code="0" 表示成功。
