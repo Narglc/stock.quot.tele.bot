@@ -6,32 +6,64 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"sort"
 	"strings"
+	"sync"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
+	"golang.org/x/image/font/gofont/goregular"
+	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 )
 
-// 纯 Go（image + image/png + basicfont）渲染清算图，无需 ffmpeg/matplotlib，输出 PNG 字节。
+// 纯 Go（image + image/png + goregular 矢量字体）渲染清算图，无需 ffmpeg/matplotlib。
+// 相比早期版本：分辨率提升、抗锯齿矢量字体、热力图叠加 OKX K线蜡烛。
 
 var (
-	colBg    = color.RGBA{20, 20, 26, 255}
-	colText  = color.RGBA{225, 225, 225, 255}
-	colAxis  = color.RGBA{150, 150, 160, 255}
-	colNow   = color.RGBA{0, 229, 255, 255}  // 现价线：青
-	colShort = color.RGBA{231, 76, 60, 255}  // 上方空头爆仓：红
-	colLong  = color.RGBA{46, 204, 113, 255} // 下方多头爆仓：绿
+	colBg     = color.RGBA{18, 18, 24, 255}
+	colText   = color.RGBA{228, 228, 232, 255}
+	colAxis   = color.RGBA{150, 150, 162, 255}
+	colNow    = color.RGBA{0, 229, 255, 255}  // 现价线：青
+	colShort  = color.RGBA{231, 76, 60, 255}  // 上方空头爆仓：红
+	colLong   = color.RGBA{46, 204, 113, 255} // 下方多头爆仓：绿
+	colCandUp = color.RGBA{38, 255, 140, 255} // 上涨蜡烛：亮绿
+	colCandDn = color.RGBA{255, 92, 122, 255} // 下跌蜡烛：亮红
 )
 
-// RenderLiqHeatmapPNG 渲染完整清算热力图（时间×价格网格 + 现价线）为 PNG。
+// 矢量字体（goregular），parse 一次缓存；失败回落 basicfont。
+var (
+	fontOnce       sync.Once
+	faceSm, faceLg font.Face
+)
+
+func loadFonts() {
+	fontOnce.Do(func() {
+		ft, err := opentype.Parse(goregular.TTF)
+		if err != nil {
+			faceSm, faceLg = basicfont.Face7x13, basicfont.Face7x13
+			return
+		}
+		faceSm, _ = opentype.NewFace(ft, &opentype.FaceOptions{Size: 13, DPI: 72, Hinting: font.HintingFull})
+		faceLg, _ = opentype.NewFace(ft, &opentype.FaceOptions{Size: 16, DPI: 72, Hinting: font.HintingFull})
+		if faceSm == nil {
+			faceSm = basicfont.Face7x13
+		}
+		if faceLg == nil {
+			faceLg = basicfont.Face7x13
+		}
+	})
+}
+
+// RenderLiqHeatmapPNG 渲染完整清算热力图（时间×价格网格 + K线蜡烛 + 现价线）为 PNG。
 func RenderLiqHeatmapPNG(h *LiqHeatmap) ([]byte, error) {
 	P, T := len(h.Prices), len(h.Times)
 	if P == 0 || T == 0 {
 		return nil, fmt.Errorf("空热力图")
 	}
-	const mL, mR, mT, mB = 66, 16, 22, 18
-	const plotW, plotH = 880, 440
+	loadFonts()
+	const mL, mR, mT, mB = 80, 18, 30, 26
+	const plotW, plotH = 1280, 600
 	W, H := mL+plotW+mR, mT+plotH+mB
 	img := image.NewRGBA(image.Rect(0, 0, W, H))
 	fillRect(img, 0, 0, W, H, colBg)
@@ -44,8 +76,16 @@ func RenderLiqHeatmapPNG(h *LiqHeatmap) ([]byte, error) {
 	if pMax <= pMin {
 		pMax = pMin + 1
 	}
-	// 价格→像素 y（高价在上）
 	priceY := func(p float64) int { return mT + int((pMax-p)/(pMax-pMin)*float64(plotH)) }
+	clampY := func(y int) int {
+		if y < mT {
+			return mT
+		}
+		if y > mT+plotH {
+			return mT + plotH
+		}
+		return y
+	}
 
 	// 逐格填色
 	for yi := 0; yi < P; yi++ {
@@ -53,32 +93,86 @@ func RenderLiqHeatmapPNG(h *LiqHeatmap) ([]byte, error) {
 		yBot := mT + int(float64(P-yi)/float64(P)*float64(plotH))
 		row := h.Values[yi]
 		for xi := 0; xi < T; xi++ {
-			v := row[xi]
-			if v <= 0 {
-				continue
+			if v := row[xi]; v > 0 {
+				x0 := mL + int(float64(xi)/float64(T)*float64(plotW))
+				x1 := mL + int(float64(xi+1)/float64(T)*float64(plotW))
+				fillRect(img, x0, yTop, x1, yBot, heatColor(v/maxV))
 			}
-			x0 := mL + int(float64(xi)/float64(T)*float64(plotW))
-			x1 := mL + int(float64(xi+1)/float64(T)*float64(plotW))
-			fillRect(img, x0, yTop, x1, yBot, heatColor(v/maxV))
 		}
 	}
+
+	// 叠加 K线蜡烛（与时间轴对齐）
+	drawCandles(img, h, mL, plotW, T, priceY, clampY)
 
 	// 现价线 + 标注
 	if h.CurrentPrice > pMin && h.CurrentPrice < pMax {
 		cy := priceY(h.CurrentPrice)
 		drawHLine(img, mL, mL+plotW, cy, colNow)
-		drawText(img, mL+plotW-110, cy-3, "now $"+priceLabel(h.CurrentPrice), colNow)
+		drawText(img, mL+plotW-130, cy-4, "now $"+priceLabel(h.CurrentPrice), colNow, faceSm)
 	}
 	// y 轴价格刻度
-	for i := 0; i <= 6; i++ {
-		p := pMin + (pMax-pMin)*float64(i)/6
-		drawText(img, 2, priceY(p)+4, "$"+priceLabel(p), colAxis)
+	for i := 0; i <= 8; i++ {
+		p := pMin + (pMax-pMin)*float64(i)/8
+		drawText(img, 4, priceY(p)+5, "$"+priceLabel(p), colAxis, faceSm)
 	}
-	// 标题 + 时间轴说明
-	drawText(img, mL, 14, fmt.Sprintf("%s Liquidation Heatmap  %dx%d  %s", h.Symbol, P, T, h.Interval), colText)
-	drawText(img, mL, H-5, "<- older        time        now ->", colAxis)
+	drawText(img, mL, 20, fmt.Sprintf("%s Liquidation Heatmap + candles   %dx%d   %s", h.Symbol, P, T, h.Interval), colText, faceLg)
+	drawText(img, mL, H-8, "<- older        time        now ->", colAxis, faceSm)
 
 	return encodePNG(img)
+}
+
+// drawCandles 把 K线蜡烛按时间对齐叠加到热力图上。
+func drawCandles(img *image.RGBA, h *LiqHeatmap, mL, plotW, T int, priceY func(float64) int, clampY func(int) int) {
+	if len(h.Candles) == 0 {
+		return
+	}
+	kts := make([]int64, len(h.Candles))
+	for i, c := range h.Candles {
+		kts[i] = c.Ts
+	}
+	colW := float64(plotW) / float64(T)
+	bodyW := int(colW * 0.7)
+	if bodyW < 1 {
+		bodyW = 1
+	}
+	for xi := 0; xi < T; xi++ {
+		c := nearestCandle(h.Candles, kts, h.Times[xi])
+		if c == nil {
+			continue
+		}
+		cx := mL + int((float64(xi)+0.5)*colW)
+		col := colCandUp
+		if c.C < c.O {
+			col = colCandDn
+		}
+		vLine(img, cx, clampY(priceY(c.H)), clampY(priceY(c.L)), col) // 影线
+		yo, yc := clampY(priceY(c.O)), clampY(priceY(c.C))            // 实体
+		if yo > yc {
+			yo, yc = yc, yo
+		}
+		if yc == yo {
+			yc = yo + 1
+		}
+		fillRect(img, cx-bodyW/2, yo, cx+bodyW/2+1, yc, col)
+	}
+}
+
+// nearestCandle 找与时间 t 最接近的一根 K线（kts 升序）。
+func nearestCandle(cs []Candle, kts []int64, t int64) *Candle {
+	if len(cs) == 0 {
+		return nil
+	}
+	i := sort.Search(len(kts), func(i int) bool { return kts[i] >= t })
+	if i == 0 {
+		return &cs[0]
+	}
+	if i >= len(cs) {
+		return &cs[len(cs)-1]
+	}
+	if t-kts[i-1] <= kts[i]-t {
+		return &cs[i-1]
+	}
+	return &cs[i]
 }
 
 // RenderLiqMapPNG 渲染清算地图（最新时间列的横向柱状分布）为 PNG。
@@ -87,6 +181,7 @@ func RenderLiqMapPNG(m *LiqMap) ([]byte, error) {
 	if len(all) == 0 {
 		return nil, fmt.Errorf("清算地图无数据")
 	}
+	loadFonts()
 	pMin, pMax, maxV := all[0].Price, all[0].Price, 0.0
 	for _, c := range all {
 		if c.Price < pMin {
@@ -106,8 +201,8 @@ func RenderLiqMapPNG(m *LiqMap) ([]byte, error) {
 		maxV = 1
 	}
 
-	const mL, mR, mT, mB = 70, 70, 22, 18
-	const plotW, plotH = 740, 760
+	const mL, mR, mT, mB = 84, 84, 30, 26
+	const plotW, plotH = 900, 900
 	W, H := mL+plotW+mR, mT+plotH+mB
 	img := image.NewRGBA(image.Rect(0, 0, W, H))
 	fillRect(img, 0, 0, W, H, colBg)
@@ -117,8 +212,8 @@ func RenderLiqMapPNG(m *LiqMap) ([]byte, error) {
 	if barH < 2 {
 		barH = 2
 	}
-	if barH > 8 {
-		barH = 8
+	if barH > 10 {
+		barH = 10
 	}
 
 	drawBars := func(cs []LiqCluster, col color.RGBA) {
@@ -131,32 +226,29 @@ func RenderLiqMapPNG(m *LiqMap) ([]byte, error) {
 	drawBars(m.Above, colShort)
 	drawBars(m.Below, colLong)
 
-	// 现价线
 	if m.CurrentPrice > pMin && m.CurrentPrice < pMax {
 		cy := priceY(m.CurrentPrice)
 		drawHLine(img, mL, mL+plotW, cy, colNow)
-		drawText(img, mL+plotW-120, cy-3, "now $"+priceLabel(m.CurrentPrice), colNow)
+		drawText(img, mL+plotW-140, cy-4, "now $"+priceLabel(m.CurrentPrice), colNow, faceSm)
 	}
-	// y 轴价格刻度
-	for i := 0; i <= 8; i++ {
-		p := pMin + (pMax-pMin)*float64(i)/8
-		drawText(img, 2, priceY(p)+4, "$"+priceLabel(p), colAxis)
+	for i := 0; i <= 10; i++ {
+		p := pMin + (pMax-pMin)*float64(i)/10
+		drawText(img, 4, priceY(p)+5, "$"+priceLabel(p), colAxis, faceSm)
 	}
-	// 标注上/下方最大簇的额度
 	labelTop := func(cs []LiqCluster) {
 		if len(cs) == 0 {
 			return
 		}
-		c := cs[0] // 已按额降序
+		c := cs[0]
 		y := priceY(c.Price)
 		w := int(c.Value / maxV * float64(plotW))
-		drawText(img, mL+w+3, y+4, formatCompact(c.Value), colText)
+		drawText(img, mL+w+4, y+5, formatCompact(c.Value), colText, faceSm)
 	}
 	labelTop(m.Above)
 	labelTop(m.Below)
 
-	drawText(img, mL, 14, fmt.Sprintf("%s Liquidation Map  now $%s  %s", m.Symbol, priceLabel(m.CurrentPrice), m.Interval), colText)
-	drawText(img, mL, H-5, "red=short liqs above  /  green=long liqs below   (bar = notional)", colAxis)
+	drawText(img, mL, 20, fmt.Sprintf("%s Liquidation Map   now $%s   %s", m.Symbol, priceLabel(m.CurrentPrice), m.Interval), colText, faceLg)
+	drawText(img, mL, H-8, "red = short liqs above   /   green = long liqs below   (bar = notional)", colAxis, faceSm)
 
 	return encodePNG(img)
 }
@@ -191,11 +283,20 @@ func drawHLine(img *image.RGBA, x0, x1, y int, col color.RGBA) {
 	}
 }
 
-func drawText(img *image.RGBA, x, y int, s string, col color.Color) {
+func vLine(img *image.RGBA, x, y0, y1 int, col color.RGBA) {
+	if y1 < y0 {
+		y0, y1 = y1, y0
+	}
+	for y := y0; y <= y1; y++ {
+		img.SetRGBA(x, y, col)
+	}
+}
+
+func drawText(img *image.RGBA, x, y int, s string, col color.Color, face font.Face) {
 	d := &font.Drawer{
 		Dst:  img,
 		Src:  image.NewUniform(col),
-		Face: basicfont.Face7x13,
+		Face: face,
 		Dot:  fixed.P(x, y),
 	}
 	d.DrawString(s)

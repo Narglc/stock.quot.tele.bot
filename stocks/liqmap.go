@@ -39,6 +39,7 @@ type LiqHeatmap struct {
 	Values       [][]float64 // [价格索引][时间索引] 清算额(USD)，P×T
 	CurrentPrice float64
 	MaxValue     float64
+	Candles      []Candle // 叠加在热力图上的 K线（best-effort，可能为空）
 }
 
 // apifyClient：Apify actor 同步运行较慢（约 60~90s），用长超时。
@@ -74,6 +75,13 @@ func GetLiqHeatmap(symbol, apifyToken string) (*LiqHeatmap, error) {
 		cur = h.Prices[len(h.Prices)/2]
 	}
 	h.CurrentPrice = cur
+
+	// K线（best-effort，用于热力图叠蜡烛）。粒度与热力图一致。
+	if kl, kerr := GetKlines(symbol, klineBar(h.Interval), 300); kerr == nil {
+		h.Candles = kl
+	} else {
+		log.Warnf("清算图 K线获取失败 %s: %v", symbol, kerr)
+	}
 	return h, nil
 }
 

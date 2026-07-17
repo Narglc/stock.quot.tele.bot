@@ -1,37 +1,39 @@
 # TODO / 待办
 
-## 🟡 暂缓：清算热力图（Liquidation Heatmap / 清算地图）接入
+## ✅ 已完成
 
-> 目标：把"价格到 X 会爆 Y 亿"的**预测性**清算热力图接进 bot。
-> 关注范围：**仅 BTC**。推送方式：**单独做「早八 / 晚八」两个 cron 各拉一次**（2 次/天），**不进整点播报**。
-> 状态：调研完成，实现暂缓（2026-07-11 记录）。
+- **清算图**：`/liqmap [币种]`（拉 CoinAnk 热力图 → 纯 Go 渲染热力图+清算地图 PNG 相册）+ 早八/晚八 BTC 清算图 cron（需 `APIFY_TOKEN`）。数据源用 Apify actor（免费 5 次/UTC 天）。
+- **行情增强**：OKX 衍生品——持仓量及**变化解读**、多空比、**资金费率**；全市场概览（总市值/BTC.D/ETH.D）；恐惧贪婪。
+- **整点播报不刷屏**：删掉上一条 + 静音发新（群里始终一条、在最底部）。
+- **图源**：超时 + 错误上抛（失败原因带进消息）+ 成功率加权选源；新增 waifu.pics、pic.re。
+- **/dice** 动画骰子；**优雅退出**（SIGINT/SIGTERM）。
+- **MCP 语音** `send_voice`（可带 caption）+ 可插拔 TTS（azure/edge/http 委托本地 worker）。
 
-### 概念区分（别混）
-- **清算热力图（预测）** = 未来地图，"上方 X 堆 Y 亿待爆"，是磁吸目标。← **我们要的**
-- **清算历史（已发生）** = 后视镜，用于"爆仓瀑布=局部见底/顶"的瞬时信号。价值次之，可后置。
+## 🟡 待办 backlog（按价值）
 
-### 数据源调研结论（成本 / 稳定性）
+### 行情 / 指标
+- 🟡 **K线 + 技术指标**（RSI/MACD/MA200/布林带）——清算图已叠 K线；播报文字加 RSI/均线待做。
+- 🟡 **清算历史**（Coinalyze 免费 API：24h 多空爆仓额），与清算地图互补。
+- 🟡 **/price 实时曲线图**（sparkline/小 K线 PNG）。
+- 🟢 宏观：ETF 净流入 / 稳定币供给。
+- 🟡 **转正到 CoinAnk 官方 API**（替代 Apify 社区爬虫求稳；base `https://open-api.coinank.com`，header `apikey`，热力图端点 `/api/liqMap/getLiqHeatMapSymbol`，非会员走 x402 按次付）。
 
-| 优先级 | 方案 | 成本 | 稳定性 | 备注 |
-|---|---|---|---|---|
-| 🥇 先上（试水） | **Apify Actor** `api_merge/coinank-liquidation-heatmap` | **免费**（5 次/UTC 天，我们 2 次/天够用；超出 $10/千次） | 中（社区爬虫，2 用户/0 评价，随时可能失效） | 输入 `BTCUSDT`，输出 JSON（价位桶+杠杆+K线+更新时间）。调用：`POST https://api.apify.com/v2/acts/.../run-sync-get-dataset-items?token=xxx` |
-| 🥈 转正（求稳） | **CoinAnk 官方 API** | 会员 or **x402 按次付费**（2 次/天极便宜；确切会员价在 coinank.com/vip，需登录） | 高 | base `https://open-api.coinank.com`，header `apikey: xxx`；热力图端点 `GET /api/liqMap/getLiqHeatMapSymbol`；BTC 全支持。热力图大概率不在免费档，非会员走 x402（服务器返回 402 时按次付），会员专属路由返回 `code:-3` |
-| 🥉 备选 | **Hyblock** | 多半付费（免费档≈网页限 BTC，**API 未必给 key**）；或 Bybit 刷 $1M/月量换 Advanced | 高 | `GET https://api.hyblockcapital.com/v2/liquidationHeatmap`，参数含 **leverage**（能按杠杆档过滤，差异化）；鉴权重（OAuth2 client-credentials + Bearer + x-api-key）。只有要"精细杠杆过滤"才值 |
+### 交互 / 形态
+- 🔥 **Inline 按钮**：行情/清算图挂「🔄刷新 / 切币种」回调按钮。
+- 🟡 群里「看涨/看跌」**Poll**。
 
-**其它免费源**：Coinalyze 有真·免费 API，但**只有清算历史**、没有预测热力图。
+### 语音 / TTS
+- 🟡 **Redis 队列异步补发**（本地 worker 离线时 send_voice 入队，上线补发）。
+- 🟡 **本地 GPU 模型（ChatTTS）接 worker 的 `_gpu` 后端**（stub 已留）。
+- 🟢 **aliyun CosyVoice provider**（国内实名可用，中文质量高；注意仅 90 天新人额度非长期免费）。
 
-### 推荐路线
-先用 **Apify 免费额度**接进来验证效果（早八/晚八各拉一次 BTC）→ 有用了 → 转 **CoinAnk 官方 API**（x402 按次或最低会员档）求长期稳定。Hyblock 除非要杠杆档过滤，否则跳过。
+### 无 VPS / 内容源
+- 🟡 **GitHub Actions 定时播报**（`cmd/broadcast` + workflow，serverless 推行情/清算图/语音）。
+- 🟡 **RSS → Telegram 通用推送器**（推特大V via RSSHub/Apify/或直接订 TG 频道 + Redis 去重）。
 
-### 实现要点（拾起时）
-- 返回是**价位桶 JSON**（哪个价位堆多少待爆）。推送两种形态：
-  1. **纯文本**："↑ $X 上方堆 $Y亿 · ↓ $Z 下方堆 $W亿"（最省）
-  2. **go-chart 画热力条 PNG** 图文一起发（复用 `handler/handleApi.go` 的发图链路）
-- best-effort 接法，跟 `stocks/derivatives.go`（OKX）/`sentiment.go` 一套：失败只省略、不阻断。
-- 单独 cron（`0 8 * * *` / `0 20 * * *`，东八区），不并入 `broadcastCrypto`。
-- token/apikey 走环境变量，勿进仓库。
+### 多用户 / MCP
+- 🟢 多用户 `/token` 自助注册；`send_liqmap` MCP 工具。
 
-### 参考链接
-- CoinAnk: openApi https://coinank.com/openApi · VIP https://coinank.com/vip · skill https://github.com/coinank/coinank-openapi-skill
-- Hyblock: 文档 https://docs.hyblockcapital.com/liquidation-heatmap · 定价 https://hyblockcapital.com/pricing
-- Apify Actor: https://apify.com/api_merge/coinank-liquidation-heatmap
+### 工程 / 质量
+- 🟡 stocks/handler 补更多单测（crypto 格式化、handler）。
+- 🟢 CI（build+test+vet）；`proxy-data` 改 bind mount；deploy 真实 IP → 占位符。
