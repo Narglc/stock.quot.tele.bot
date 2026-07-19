@@ -1,0 +1,403 @@
+# Freqtrade 调研笔记
+
+> 调研日期：2026-07-19
+> 目的：评估开源加密量化框架 Freqtrade 的热门用途、上手成本、与本项目（`stock.quot.tele.bot`）的结合可能。
+> 结论速览：Freqtrade 是"策略即代码 + 回测 + 参数优化 + 实盘执行"一条龙的成熟框架（GitHub ~40k★，Python，原生 Telegram/Web 控制）。玩策略/回测零门槛、免费开源；只有真金白银**实盘**才需要交易所账号 + API 密钥。
+
+---
+
+## 一、Freqtrade 是什么
+
+一句话：**从"策略想法"到"实盘执行"的完整闭环量化框架**，不只是下单脚本。
+
+- 语言：Python；数据/交易所对接走 [ccxt](https://github.com/ccxt/ccxt)。
+- 交易所：币安 / OKX / Bybit / Kraken / Gate 等主流所，支持**现货 + 合约（期货）**。
+- 控制面：原生 **Telegram Bot** + **Web UI（FreqUI）** + **REST API / Webhook**。
+- 核心卖点：回测、绘图、资金管理、**机器学习参数优化**一体化。
+
+---
+
+## 二、热门用途（按使用频率/热度排序）
+
+### 1. 策略回测 Backtesting —— 最高频
+用真实历史 K 线（OHLCV）检验策略盈亏，**含手续费**。绝大多数人 90% 时间花在这：写基于指标（RSI、布林带、MACD、均线、ATR、MFI）的进出场逻辑 → 回测数月/数年数据 → 看胜率、最大回撤、Sharpe。
+- 官方策略库：<https://github.com/freqtrade/freqtrade-strategies>
+- 第三方策略排行/对比：[strat.ninja](https://strat.ninja/)、[FreqST](https://freqst.com/)
+
+### 2. Hyperopt 参数优化 —— 第二高频
+用贝叶斯优化**自动搜索最优参数**：ROI 表、止损、指标阈值、进出场信号组合。不用手动试参，跑几百上千轮找最优解。这是 Freqtrade 区别于普通交易脚本的关键能力。
+- 文档：<https://www.freqtrade.io/en/stable/hyperopt/>
+
+### 3. Dry-run 模拟盘 —— 实盘前必经
+用实时行情但**不动真钱**跑策略，验证回测结果在真实延迟/滑点下是否站得住。几乎所有人上实盘前都会 dry-run 一段时间。
+
+### 4. FreqAI —— 近两年最火的进阶玩法
+内置 ML 模块：自动训练预测模型，把你构造的指标当特征（feature）预测未来涨跌目标，并**后台定时用新数据重训**以适应市场变化。支持 backtest / dry / live 全模式。把"技术分析策略"升级为"数据驱动预测"。
+- 文档：<https://www.freqtrade.io/en/stable/freqai/>
+
+### 5. DCA / 网格类仓位管理
+用 `adjust_trade_position` 实现**定投补仓（Dollar-Cost Averaging）**——下跌分批加仓摊低成本；或配置价格区间做**网格**。震荡市里流行的低风险打法。
+
+### 6. Edge Positioning 仓位/风险定位
+基于历史胜率和盈亏比计算"期望值 > 0"的交易对，据此动态调整仓位大小和止损。目标是长期正期望，而非单笔胜负。
+- 文档：<https://www.freqtrade.io/en/2020.9.1/edge/>
+
+### 7. Telegram / Web 远程管控
+原生 Telegram：`/status`、`/profit`、`/forceexit`、`/reload_config` 等命令随时查盈亏、手动平仓、热更策略。FreqUI 提供网页仪表盘。**与本项目高度重合**。
+
+---
+
+## 三、要不要账号 / 前置条件
+
+**软件本身完全免费、开源，不用注册任何 Freqtrade 账号。** 分场景：
+
+| 用途 | 需要什么 | 要账号吗 |
+|---|---|---|
+| 回测 Backtesting | 历史 K 线（`download-data` 从交易所公共接口拉） | ❌ 不用 |
+| Hyperopt / FreqAI | 本地算力 | ❌ 不用 |
+| Dry-run 模拟盘 | 交易所公共行情（建议配只读 key，非强制） | ❌ 不用 |
+| **实盘 Live** | **交易所账号 + API Key/Secret** | ✅ 要交易所账号 |
+| Telegram 控制 | 一个 Telegram Bot Token（@BotFather） | ✅ 要 |
+| Web UI（FreqUI） | 无 | ❌ 不用 |
+
+---
+
+## 四、缺点 / 风险（务必读）
+
+1. **不是"开箱即赚钱"**——框架只负责执行，盈亏全看策略。GitHub 公开高分策略绝大多数**过拟合历史**，实盘常亏。最大的坑。
+2. **学习曲线陡**——要会 Python、懂技术指标、会读回测报告、调 JSON 配置。
+3. **过拟合陷阱**——Hyperopt/FreqAI 极易把参数拟合到过去行情，换市场环境即失效。
+4. **回测 ≠ 实盘**——滑点、点差、成交假设、未来函数（lookahead bias）让回测虚高。
+5. **要 7×24 常驻**——需 VPS/服务器长跑；断线 / 交易所 API 变更 / ccxt 升级都要维护。
+6. **安全责任在你**——交易所 API Key 存你服务器上，**务必只开交易权限、禁提现、绑 IP 白名单**，泄漏 = 资金风险。
+7. **FreqAI 吃资源**——ML 训练要像样 CPU/GPU，配置复杂。
+8. **市场/合规风险**——闪崩、资金费率、爆仓，以及各地对自动交易/税务的监管差异，框架都不兜底。
+
+---
+
+## 五、快速上手（Docker，推荐）
+
+官方推荐 Docker 部署，和本机现有容器（ollama / redis / comfyui）可并存。
+
+```bash
+# 1) 拉官方镜像 + 目录骨架
+mkdir -p ~/ft && cd ~/ft
+curl -fsSL https://raw.githubusercontent.com/freqtrade/freqtrade/stable/docker-compose.yml -o docker-compose.yml
+docker compose pull
+
+# 2) 交互式生成配置（选交易所、法币、是否 dry-run、是否开 Telegram）
+docker compose run --rm freqtrade create-userdir --userdir user_data
+docker compose run --rm freqtrade new-config --config user_data/config.json
+
+# 3) 下载历史数据（示例：币安 BTC/USDT 5m，近 180 天）
+docker compose run --rm freqtrade download-data \
+  --exchange binance --pairs BTC/USDT ETH/USDT --timeframe 5m --days 180
+
+# 4) 放一个策略（示例：官方样例 SampleStrategy），回测
+docker compose run --rm freqtrade backtesting \
+  --strategy SampleStrategy --timeframe 5m --timerange 20260101-
+
+# 5) Hyperopt 调参（可选，较慢）
+docker compose run --rm freqtrade hyperopt \
+  --strategy SampleStrategy --hyperopt-loss SharpeHyperOptLoss --epochs 100
+
+# 6) dry-run 模拟盘常驻（config.json 里 dry_run: true）
+docker compose up -d
+docker compose logs -f freqtrade
+```
+
+- Web UI：config 里开 `api_server`（默认 `127.0.0.1:8080`），浏览器访问 FreqUI。**同 ComfyUI 一样，不要把 8080 直接暴露公网**——回环 + Tailscale/Cloudflare Tunnel。
+- 实盘前：先 dry-run 跑够时间，交易所 API Key **禁提现 + 绑 IP**。
+
+---
+
+## 六、与本项目（stock.quot.tele.bot）的结合方案
+
+本 bot 已有：整点行情播报、`/price` 查询、OKX 衍生品（持仓量/多空比/资金费率）、清算图 `/liqmap`、inline 查询。这些正好是 Freqtrade **策略的输入信号**。可选结合点，按推荐度：
+
+### 方案 A（推荐）：本 bot 只做"通知门面"，Freqtrade 独立跑
+- Freqtrade 负责策略/回测/实盘；通过其 **Webhook** 或 **REST API** 把成交/信号事件推给本 bot，由本 bot 统一播报到群。
+- 优点：**职责清晰、不重复造轮子**，两边各用擅长的技术栈（Python 量化 / Go 播报）。
+- 落地：Freqtrade `webhook` 配置指向本 bot 新增的一个 HTTP 回调端点（可复用现有 mcpserver 的 HTTP 服务思路），或本 bot 定时轮询 Freqtrade REST API 拉 `/status`、`/profit`。
+
+### 方案 B：借鉴信号，不接执行
+- 把 Freqtrade 的指标计算思路搬进本 bot 的播报，给整点行情加"技术面提示"（如 RSI 超买超卖、均线金叉死叉）。纯只读、零资金风险。
+
+### 方案 C（不建议）：在本 telebot 里重写回测/实盘引擎
+- Freqtrade 已很成熟，重复造轮子不划算。除非只想要极简单条件的自动交易。
+
+> 数据打通可选项：两边都能读同一个 Redis（本项目 `dao/rds.go` 已有 go-redis 单例；Freqtrade 侧可用 Python 写入约定 key），做松耦合的信号总线。
+
+---
+
+## 七、社区高分策略拆解（参考，勿直接实盘）
+
+### NostalgiaForInfinity（NFI，最出名）
+- 作者 iterativv，社区事实标准级策略。<https://github.com/iterativv/NostalgiaForInfinity>
+- 特点：**超大规模多条件进场 + 重度 DCA 补仓**，数十上百个 buy/sell 条件分组，偏"抄底摊平"路线。
+- 优点：现货牛/震荡市历史表现亮眼、维护活跃、社区文档多。
+- 缺点：**逻辑极复杂、参数众多**，深度 DCA 在单边下跌中占用大量保证金、有"扛单"风险；不理解就用等于开盲盒。
+
+### 官方样例族（Strategy001 / SampleStrategy）
+- 随源码附带，结构清晰，**适合入门读懂"一个策略长什么样"**：`populate_indicators` → `populate_entry_trend` → `populate_exit_trend` 三段式。
+- 不追求盈利，是学习/脚手架用途。
+
+### 经验法则
+- 任何公开策略先 **回测 + dry-run** 验证在**当前**行情下的表现，别信截图收益。
+- 关注**最大回撤**和**保证金占用**，而非只看总收益率。
+- 小资金起步，止损优先。
+
+---
+
+## 八、实测回测报告：NFI X7 · 过去一年（2025-07-19 → 2026-07-19）
+
+> 环境：本地 Docker（`freqtradeorg/freqtrade:stable`，CCXT 4.5.61）；数据源 **OKX 现货**（Binance 对本机 IP 返 HTTP 451 地域封锁，改用 OKX）。
+> 策略：`NostalgiaForInfinityX7`（iterativv/main，74804 行、单文件）。timeframe 5m + informative 15m/1h/4h/1d。
+> 起始资金 10000 USDT，`max_open_trades=5`，spot，DCA 加仓开启（`position_adjustment_enable`）。数据下载 900 天以满足 NFI `startup_candle_count` 的日线预热。
+
+### 8.1 先说一个关键结论：**单跑 BTC = 全年 0 交易（不是 bug）**
+
+第一版只放 BTC/USDT 单标的回测，结果**整年 0 笔成交**。逐层排查证明**不是配置/数据问题**：
+
+| 排查项 | 结果 |
+|---|---|
+| 数据/预热 | ✅ 补到 900 天，日线指标回溯到 2024-03，预热充足 |
+| 指标 NaN | ✅ RSI/EMA200/StochRSI 等关键指标 NaN 比例 **0%**、数值正常 |
+| 全局保护门闸 `protections_long_global` | ✅ **97% 时间为 True**，没在拦 |
+| 进场信号 | ❌ 10.5 万根 K 线 × 33 个进场条件，`enter_long` 命中 **0 次** |
+| BTC 波动是否够 | ✅ 这一年 BTC **-54% 回撤、单日 -14%**，跌幅充分 |
+| 交叉验证 ETH | 同配置 ETH 仅 **1 个信号** |
+
+**根因**：NFI 是**多标的山寨抄底 + 重度 DCA**策略，进场条件为"大盘稳、某个币相对超跌"校准。当标的就是 BTC（大盘基准）本身时，这类"相对超跌"条件几乎不成立 → 零触发。**单跑 BTC/少数大盘币不是 NFI 的用法**，标的池越大、越多深跌小币，它才越活跃。
+
+### 8.2 正确用法：6 主流币篮子（BTC/ETH/SOL/BNB/XRP/DOGE）
+
+| 指标 | 数值 |
+|---|---|
+| 回测区间 | 2025-07-19 → 2026-07-19（365 天） |
+| 总交易数 | **8 笔**（0.02 笔/天，极稀疏） |
+| 起始 / 结束资金 | 10000 → **10715.83 USDT** |
+| 总收益 | **+7.16%**（CAGR 7.16%） |
+| **同期市场变化** | **−51.58%**（大盘腰斩） |
+| 胜率 | **87.5%**（7 胜 1 负） |
+| Profit Factor | 11.27 |
+| Expectancy (Ratio) | 89.48 (1.28) |
+| 最大回撤（已平仓口径） | **0.65%**（69.69 USDT） |
+| 最大回撤（钱包口径） | 1.44%（156 USDT） |
+| Sharpe（日钱包） / Sortino | 1.11 / 4.06 |
+| 最佳 / 最差币 | SOL +3.90% / ETH −0.70% |
+| 最佳单笔 / 最差单笔 | SOL +16.09% / ETH −1.59% |
+
+**逐币**：SOL 2 笔 +390U、BNB 3 笔 +297U、DOGE 2 笔 +98U、**BTC 0 笔**、XRP 0 笔、ETH 1 笔 −70U（唯一亏损，且是回测结束时 `force_exit` 强平的一笔 grind 模式挂单，扛了 247 天）。
+
+### 8.3 怎么解读这份报告
+
+- **NFI 的画风 = 低频、高胜率、极低回撤、капитал preservation**：大盘一年腰斩（−51.58%）期间，它只出手 8 次、拿 +7.16%、最大回撤 <1.5%。**它不是要跑赢大盘涨幅，而是"少输当赢/震荡里薅"**。
+- **那笔唯一的亏损很典型**：ETH 用 grind/DCA 模式进场后一路补仓、被套 247 天，最后被回测末尾强平 −1.59%。这就是 **NFI 深度 DCA 的"扛单/占用保证金"风险**在小样本里的具象。
+- **8 笔样本太小，统计上不可靠**：`Mean profit p-value 0.06285`（未过 0.05 显著性）。想要有说服力，得放**几十个山寨对**（NFI 的正常玩法是配 `VolumePairList` 动态选 80+ 个币），单/少标的的结论仅供理解机制。
+- **数据用 OKX 现货**，与 Binance 价格/深度略有差异，绝对数字仅参考。
+
+### 8.4 本地如何复现
+
+```bash
+cd /home/ubuntu/freqtrade
+# 数据已下在 user_data/data/okx/（BTC/ETH/SOL/BNB/XRP/DOGE，5m~1d，900天）
+# 单 BTC（会得到 0 交易，验证上面的结论）：
+./run_backtest.sh
+# 6 币篮子（本报告）：
+docker run --rm -w /freqtrade -v $PWD/user_data:/freqtrade/user_data \
+  freqtradeorg/freqtrade:stable backtesting \
+  --config /freqtrade/user_data/config_basket.json \
+  --strategy NostalgiaForInfinityX7 --timeframe 5m \
+  --timerange $(date -u -d '365 days ago' +%Y%m%d)- --breakdown month
+```
+
+> 说明：Freqtrade 环境搭在 `/home/ubuntu/freqtrade/`（独立于本 bot 仓库）；NFI 策略在 `user_data/strategies/`，两份 config 在 `user_data/`。
+
+---
+
+## 九、实测：自建「双均线」策略 · 300U · BTC+ETH（2025-01-01 → 至今）
+
+> 需求：300U 本金、简单双均线、回测 BTC/ETH、"争取最优收益"。这一节记录**我会怎么做**，以及一个诚实的结论。
+> 策略文件：`user_data/strategies/DualMA.py`；配置：`user_data/configs/dualma.json`（1h、BTC+ETH、`dry_run_wallet=300`）。
+
+### 9.1 设计思路
+
+最简单的双均线交叉（现货、只做多）：**快线上穿慢线（金叉）进场，快线下穿慢线（死叉）出场**，再叠加 ROI / 止损 / 移动止损兜底。周期用 **1h**（双均线的经典摆动周期，噪音比 5m 小、hyperopt 快）。把这些都交给 Hyperopt 搜：
+
+| 搜索维度 | 空间 |
+|---|---|
+| 快线周期 `buy_fast` | 5–60 |
+| 慢线周期 `buy_slow` | 30–200 |
+| 均线类型 `buy_ma_type` | ema / sma |
+| ROI 表 / 止损 / 移动止损 | freqtrade 内置空间 |
+
+> ⚠️ 关于"最优收益"的取舍：纯利润最大化（`OnlyProfitHyperOptLoss`）会**过拟合**到几笔幸运交易。所以用 **`SharpeHyperOptLoss`（风险调整后收益）**——追求"拿得住的最优收益"。
+
+### 9.2 三步结果：基线 → 样本内调优 → **样本外验证**
+
+| 阶段 | 参数 | 区间 | 收益 | 说明 |
+|---|---|---|---|---|
+| ① 基线（默认 EMA 20/60） | 未调 | 2025-01→今 | **−39.19%** | 213 笔、胜率 46.5%，典型双均线"锯齿磨损" |
+| ② 全期 Hyperopt（150 轮） | SMA 29/60 + ROI/止损/移动止损 | 2025-01→今 | **+12.87%** | 211 笔、胜率 52.1%。同期市场 −41.67% |
+| ③ **样本外验证** ⭐ | 用**训练段(2025)**最优 SMA 52/125 | **2026-01→今** | **−27.54%** | Profit factor 0.16、Sharpe −3.14、回撤 29.65% |
+
+②的完整指标：起始 300 → **338.6 USDT（+12.87%，CAGR 8.15%）**，最大回撤 13.78%，Profit factor 1.13，Sharpe(日) 0.52。**看着不错**。
+
+但③戳破了它：在 **2025 全年**上调参（样本内 +9.21%），拿去跑**从没见过的 2026**，直接 **−27.54%**。
+
+### 9.3 诚实结论
+
+- **②的 +12.87% 是"纸面收益"**：因为它在**同一段数据上又调参又回测**（样本内）。一旦做**前段训练/后段验证**的样本外检验，策略**当场崩盘（−27.54%）**。
+- **简单双均线在 BTC/ETH 上没有可持续优势**：它在趋势里赚、在震荡里被反复"金叉买高、死叉卖低"磨死；Hyperopt 能把过去拟合得很漂亮，但那是**曲线拟合过去**，不是**预测未来**。
+- 这恰恰是 **`Hyperopt` 的头号陷阱**（见第四节缺点③）的实证。
+
+### 9.4 那"争取最优收益"到底该怎么做？
+
+不是把 in-sample 数字调到最大，而是**让样本外不崩**：
+
+1. **永远做样本外/滚动验证（walk-forward）**：freqtrade 有 `--timerange` 切训练/验证，进阶用 `lookahead-analysis` + `recursive-analysis` 查未来函数/前视偏差。in-sample 再漂亮都不算数。
+2. **少调参、加约束**：参数越多越容易过拟合。双均线只留 2–3 个核心参数、用 Sharpe/Sortino 而非纯利润做目标。
+3. **换更有结构性 alpha 的思路**：单纯双均线 edge 太薄。要么加**过滤器**（趋势/波动率/成交量确认，只在趋势市开单、震荡市空仓），要么直接用成熟策略（NFI 那种多标的深跌抄底，见第八节）。
+4. **多标的分散**：2 个币样本太小、噪音大；扩到一篮子能让统计更稳。
+5. **先纸面（dry-run）几周**再谈实盘，交易所 API Key 禁提现 + 绑 IP。
+
+> 复现：`./scripts/hyperopt.sh dualma 20250101-20251231 150`（训练）→ `./scripts/bt.sh dualma 20260101`（样本外）。全期最优参数存于 `user_data/strategies/DualMA.json`（另有同名 `DualMA.fullperiod.json` 备份）；训练段最优参数（SMA 52/125）见 `logs/hyperopt_dualma_train.log`。
+
+### 9.5 拉长回测到 2024-01-01：结果完全不一样（再证过拟合）
+
+补齐 BTC/ETH 的 1h 数据到 2023-10（此前 BTC 1h 只到 2025-06，导致 §9.2 的 BTC 段被少测；数据补全后 2025-01→今 修正为 **+16.15%**）。用**同一套参数（SMA 29/60）**换不同起点：
+
+| 回测起点 | 交易数 | 收益 | Profit Factor | 最大回撤 | 同期市场 |
+|---|---|---|---|---|---|
+| 2025-01-01 → 今（数据补全修正） | 252 | **+16.15%** | 1.14 | 16.4% | −37.95% |
+| **2024-01-01 → 今** | 409 | **−8.07%** | 0.95 | 35.9% | **+16.90%** |
+
+**结论：换个起点，结果天差地别。** 同一套参数在 2025 赚 +16%，把窗口拉到含 2024 就变成 **−8%**；而且 2024 起这段**市场明明涨了 +16.9%，策略却亏 8%**（跑输 buy&hold 约 25 个点）。这再次坐实：**参数是拟合 2025 的，换段数据就失效——简单双均线没有跨周期的稳定 edge。**
+
+### 9.6 手续费与滑点
+
+- **手续费：已计入。** 回测日志 `Using fee 0.1500%`——OKX 最差档 taker **单边 0.15%**，一进一出**往返 ≈ 0.3%**。
+- **这在高频双均线里是大头**：2024 起那版 **409 笔**往返，光手续费就吃掉约 `409 × 往返0.3% ≈ 全仓的 120%+` 量级的摩擦成本（分摊到每笔小 edge 上极其致命）——**"锯齿磨损"里很大一块其实是手续费**。
+- **滑点：默认未建模。** freqtrade 标准回测假设按信号价成交，**不含滑点/挂单不成交**，因此真实成交只会**更差**。要逼近现实可在策略里加 `custom_entry_price` 或用 `--enable-protections`、限价单模型。
+- 换句话说：**上面的收益已经是"乐观值"**（含费但不含滑点），实盘只会更低。
+
+### 9.7 DualMA v2：加过滤器后，跨周期稳健性明显提升 ✅
+
+针对 v1「换段数据就失效」的病，做了 `DualMA_v2`（`strategies/DualMA_v2.py`）：金叉进场时**多加两道过滤**——
+
+1. **EMA200 方向过滤**：只在 `收盘价 > EMA200`（大趋势向上）才做多；
+2. **ADX 强度过滤**：只在 `ADX > 阈值`（确有趋势、非横盘）才开单。
+
+同样方法论：**2025 段调参**（得 SMA 46/57 + ADX≥36），再拿去测别的时段。对比 v1：
+
+| 时段 | v1（纯双均线） | **v2（+EMA200+ADX）** |
+|---|---|---|
+| 2025 起（样本内） | +16.15% ／ PF 1.14 ／ 回撤 16.4% ／ 252 笔 | +5.66% ／ PF 2.47 ／ 回撤 **3.5%** ／ 20 笔 |
+| **2024 起（样本外）** | **−8.07%** ／ PF 0.95 ／ 回撤 35.9% | **+13.71%** ／ PF **4.31** ／ 回撤 3.5% ／ 胜率 65.6% ／ Sharpe 1.10 |
+| 2026 起（样本外） | —（v1 训练/验证另算 −27.5%） | +1.23% ／ PF 1.45 ／ 回撤 3.5% |
+
+**结论：过滤器奏效了。**
+- v1 拉到 2024 **崩成 −8%**；v2 在 2024 **稳住 +13.71%**，且 **PF 4.31、回撤仅 3.5%、胜率 65.6%**。
+- v2 在**三段独立时间窗全部为正**（+5.66% / +13.71% / +1.23%），回撤全都压在 3.5%——这种**跨周期一致性**正是 v1 缺的。
+- 代价：**交易数从 252 → 20~32 笔**。过滤器砍掉了 90% 的震荡市无效交易（也就砍掉了手续费黑洞），用「少而准」换来了稳健。
+- 直觉：v1 在下跌/横盘里乱金叉抄底被磨死；v2 只在「趋势向上 + 有动能」时才动手，天然避开了 v1 亏钱的那些场景。
+
+**但仍要清醒**：
+- 交易样本小（9~32 笔），统计上仍偏薄；三段全正是好信号，但不等于未来必赚。
+- 2026 段只有 +1.23%（勉强为正），ADX≥36 门槛很高、出手极少。
+- 收益仍是**含费不含滑点的乐观值**；实盘更低。
+- 想更扎实：扩到一篮子币 + 滚动前向验证（walk-forward）多窗口重复。
+
+> 复现：`./scripts/hyperopt.sh dualma_v2 20250101 150` → `./scripts/bt.sh dualma_v2 20240101`。参数存 `strategies/DualMA_v2.json`。
+
+### 9.8 严格验证：篮子 / 15m / Walk-Forward —— 结论翻转 ⚠️
+
+§9.7 的 v2「+13.71%」看着很香，于是做了三组更严格的验证。**结论：那是单次切分的运气，严格验证下 v2 并不成立。**
+
+**A) 扩到 6 币篮子（1h）**——想靠多标的增加交易数、改善统计：
+
+| 篮子 v2 | 收益 | 交易数 | 回撤 |
+|---|---|---|---|
+| 2025 起（样本内） | +4.17% | 13 | 0.79% |
+| 2024 起（样本外） | +5.73% | 19 | 0.79% |
+
+6 个币加起来才 13~19 笔（比 BTC+ETH 单跑还少），PF 高到 8000+ 是"几乎没亏损单"的假象。**ADX≥36 太严，扩池救不了统计显著性。**
+
+**B) 降到 15m（BTC+ETH）**——想靠低级别增加交易数：
+
+| 15m v2 | 收益 | PF | 交易数 |
+|---|---|---|---|
+| 2025 起（样本内） | +0.55% | 1.18 | 17 |
+| 2024 起（样本外） | **−7.79%** | 0.42 | 32 |
+| 2024 整年（样本外） | **−8.29%** | 0.23 | 15 |
+
+**同一个 v2，1h 上 2024 赚 +13.71%，换到 15m 变 −7.79%。** 低级别噪音 + 手续费吃光 edge，实证「该用 1h 不该下 15m」。
+
+**C) Walk-Forward 滚动前向验证（1h，最硬的检验）**——用过去半年调参、交易紧邻的下半年：
+
+| 训练段 | 验证段（样本外） | 收益 | PF | 交易数 |
+|---|---|---|---|---|
+| 2024H1 | 2024H2 | **−1.94%** | 0.79 | 17 |
+| 2024H2 | 2025H1 | **−2.11%** | 0.00 | 2 |
+| 2025H1 | 2025H2 | **−8.94%** | 0.13 | 8 |
+| 2025H2 | 2026H1 | **−9.36%** | 0.00 | 9 |
+
+**四窗无一为正。** §9.7 的 +13.71% 是「用 2025 参数恰好撞上 2024 大牛」的单次幸运；真正的滚动前向验证下，**v2 每个窗口都亏**。
+
+**另一个坑：Hyperopt 有随机性。** 同一个 WF 窗口跑两次，第一次 +0.55%/3 笔、第二次 −1.94%/17 笔——**每次搜到的参数不同，结果飘忽**，说明这点 edge 本就不稳。
+
+**§9 最终裁决**：
+- **双均线（哪怕加 EMA200+ADX 过滤）在 BTC/ETH 上没有可前向交易的稳定 edge。**
+- v1/v2 那些好看的数字，都是**样本内 / 单次切分**的产物；一上 walk-forward 全现原形。
+- 这恰好把第四节、第九节前半、以及全网研究的告诫**闭环验证**了一遍：**单次回测/单次切分毫无意义，只有 walk-forward + 足够交易样本 + 前向 dry-run 才算数**。
+- 想真正"搞钱"：别指望简单指标策略，要么上有结构性 alpha 的成熟策略（如 NFI 那套多标的深跌抄底，见第八节），要么老实做市场中性/被动定投，并始终以 walk-forward 为准绳。
+
+> 复现：`./scripts/walkforward.sh dualma_v2 120`（四窗滚动）；篮子 `./scripts/bt.sh dualma_v2_basket 20240101`；15m `./scripts/bt.sh dualma_v2_15m 20240101`。
+
+---
+
+## 十、项目目录规整（多策略可扩展）
+
+`/home/ubuntu/freqtrade/` 已按"**分层配置 + 职责分目录**"重整，专为后续多策略：
+
+```
+freqtrade/
+├── scripts/                 # 通用封装（不用每个策略复制 run 脚本）
+│   ├── bt.sh                #   回测:  ./scripts/bt.sh <策略> [起始日 或 起始-结束] [额外参数]
+│   ├── hyperopt.sh          #   调参:  ./scripts/hyperopt.sh <策略> [区间] [轮数] [loss]
+│   └── walkforward.sh       #   滚动前向验证:  ./scripts/walkforward.sh <策略> [轮数] [loss]
+├── logs/                    # 所有运行日志
+└── user_data/
+    ├── strategies/          # 策略 .py + 同名 .json（hyperopt 产出的最优参数，回测自动加载）
+    │   ├── NostalgiaForInfinityX7.py
+    │   ├── DualMA.py        #   双均线 v1
+    │   └── DualMA_v2.py     #   双均线 v2（+EMA200+ADX 过滤）
+    ├── configs/             # ⭐分层配置
+    │   ├── base.json        #   公共：交易所/资金/撮合/pricing
+    │   ├── nfi.json         #   NFI 差异：标的池/周期/DCA
+    │   ├── dualma.json      #   双均线 v1：BTC+ETH/1h/300U
+    │   ├── dualma_v2.json   #   v2：BTC+ETH/1h
+    │   ├── dualma_v2_15m.json    #   v2：15m 级别对比
+    │   └── dualma_v2_basket.json #   v2：6 币篮子
+    ├── tools/               # 辅助脚本（introspect.py 等）
+    ├── data/okx/            # 行情（按交易所分目录，freqtrade 规矩）
+    ├── backtest_results/    # 回测产物
+    └── hyperopt_results/    # 调参产物
+```
+
+**核心：分层配置**。每个策略 = `base.json`（公共，写一次） + `<策略>.json`（十几行差异），命令行 `--config base.json --config <策略>.json` 深度合并（后者覆盖前者）。
+
+**加新策略三步**：① `strategies/` 放 `.py` → ② `configs/` 加一份薄 config → ③ `./scripts/bt.sh <名字> <区间>`。
+
+**约定**：
+- hyperopt 最优参数自动落到 `strategies/<策略>.json`，回测/实盘会**自动加载**（不用手动填回 .py）。
+- 时间区间：`20250101`=从该日至今；`20250101-20251231`=闭区间（脚本已自动识别）。
+
+---
+
+## 附：参考链接
+- 官网文档：<https://www.freqtrade.io/en/stable/>（Backtesting / Hyperopt / FreqAI / Edge / REST-API / Webhook 各有专页）
+- 主仓库：<https://github.com/freqtrade/freqtrade>
+- 官方策略库：<https://github.com/freqtrade/freqtrade-strategies>
+- 策略对比站：<https://strat.ninja/> · <https://freqst.com/>
