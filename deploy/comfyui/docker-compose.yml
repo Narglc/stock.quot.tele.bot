@@ -12,7 +12,7 @@ services:
     volumes:
       - ./models:/app/models     # 检查点放 ./models/checkpoints/，LoRA 放 ./models/loras/
       - ./output:/app/output
-    # ports: ["8188:8188"]       # 需要 ComfyUI 网页调试时再开
+    ports: ["8188:8188"]         # ComfyUI 网页端：宿主机 127.0.0.1:8188 / 局域网 <本机IP>:8188
     deploy:
       resources:
         reservations:

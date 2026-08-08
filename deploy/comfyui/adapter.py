@@ -76,24 +76,34 @@ def generate(prompt, negative, seed):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _fail(self, code, msg):
+        # 错误详情放响应体(utf-8)，状态行只用 ASCII reason，
+        # 避免 send_error 把中文错误塞进 HTTP 状态行触发 latin-1 UnicodeEncodeError（连接崩断）。
+        body = msg.encode("utf-8", "replace")
+        self.send_response(code, "Error")
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         if self.path.rstrip("/") != "/gen":
-            self.send_error(404)
+            self._fail(404, "not found")
             return
         if TOKEN and self.headers.get("X-Auth-Token") != TOKEN:
-            self.send_error(401)
+            self._fail(401, "unauthorized")
             return
         try:
             n = int(self.headers.get("Content-Length", 0))
             p = json.loads(self.rfile.read(n) or b"{}")
             prompt = (p.get("prompt") or "").strip()
             if not prompt:
-                self.send_error(400, "empty prompt")
+                self._fail(400, "empty prompt")
                 return
             seed = int(p.get("seed", int(time.time() * 1000) % (2 ** 31)))
             data = generate(prompt, p.get("negative", ""), seed)
         except Exception as e:  # noqa: BLE001
-            self.send_error(500, str(e)[:200])
+            self._fail(500, str(e)[:200])
             return
         self.send_response(200)
         self.send_header("Content-Type", "image/png")
