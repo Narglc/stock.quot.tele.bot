@@ -1,0 +1,19 @@
+# golangci-lint 配置。重点是 staticcheck——它能抓到 go vet 抓不到的问题，
+# 比如废弃 API（rand.Seed 在 Go 1.20 起已废弃）。
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck      # 未处理的错误返回值
+    - govet
+    - ineffassign   # 赋了值却没用
+    - staticcheck   # 含废弃 API 检查
+    - unused
+
+issues:
+  exclude-rules:
+    # 日志与 best-effort 的清理路径允许忽略错误，逐条判断成本高于收益。
+    - path: _test\.go
+      linters:
+        - errcheck

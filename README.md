@@ -4,8 +4,11 @@
 
 - **群聊定时提醒**：工作日起床/午饭/下班等（`schedule/`）
 - **随机图片 / 表情包**：`/wakeup` 拉随机图、`/sticker` 随机表情，用户发来的图/表情自动收藏进 Redis
-- **行情播报 + `/price` 即时查询 + inline 查询**：CoinGecko `/coins/markets`（价、1h/24h/7d/30d 涨跌、高低、成交额、距 ATH、市值）+ 恐惧贪婪指数（alternative.me）+ OKX 衍生品（持仓量及变化、多空比、资金费率、持仓/价格组合解读）+ 全市场概览（总市值、BTC.D/ETH.D）。**整点播报采用"原地编辑同一条消息"刷新，不刷屏**；`/price [币种...]` 随时查；inline 输入 `@bot [币种...]` 也能查（需 @BotFather `/setinline` 开启）。
+- **行情播报 + `/price` 即时查询 + inline 查询**：CoinGecko `/coins/markets`（价、1h/24h/7d/30d 涨跌、高低、成交额、距 ATH、市值）+ 恐惧贪婪指数（alternative.me）+ OKX 衍生品（持仓量及变化、多空比、资金费率、持仓/价格组合解读）+ 全市场概览（总市值、BTC.D/ETH.D）。**播报是事件驱动的**：平时静默，只在行情跨越某个状态时才响（资金费率翻转/进入极端区、持仓量骤变、突破 24h 高低、恐惧贪婪跨档）；每天早八另发一条完整面板作为保底心跳。`/price [币种...]` 随时查；inline 输入 `@bot [币种...]` 也能查（需 @BotFather `/setinline` 开启）。
 - **清算图 `/liqmap [币种]`**：拉 CoinAnk 清算热力图，纯 Go 渲染「热力图 + 清算地图」两张 PNG 相册（`stocks/liqmap.go` + `stocks/liqrender.go`）；配 `APIFY_TOKEN` 后还会早八/晚八各定时播报一次 BTC。
+- **判断追踪 `/claim`**：记一条**带证伪条件**的判断，能解析成价格条件的每小时自动检查，触发证伪立刻通知；到期未触发则提醒你 `/resolve` 结案。`/claims export` 导出 jsonl。没有证伪条件的判断会被拒收——不能证伪的话涨了算对跌了能找补，没有信息价值。
+- **A股自选 `/watch`**：`/watch add 600519` 加自选、`/watch` 看行情，每交易日 15:05 收盘后自动播报一次（数据源东方财富）。盘中查询会强制标注「截至 HH:MM」——盘中数字随时会变，不标时间事后没法复盘。
+- **清算图网页**：`/liqmap` 发的是静态 PNG，看不了具体数值；配套的 Cloudflare Worker 提供可交互网页版：横轴价格、柱子是单档清算额，另有两条从现价向两边的累计曲线（「涨/跌到这里一共会扫掉多少」），悬停可看精确数值（[`deploy/liqmap-web/`](deploy/liqmap-web/)）。
 - **娱乐 `/dice`**：Telegram 动画骰子/飞镖/老虎机等。
 - **AI 生图 `/gen <描述>`**：本地 GPU worker（diffusers，SDXL/FLUX，支持 LoRA）出图，bot 只发提示词收图（`handler/gen.go` + `deploy/image-worker/`）。本地→VPS 打通见 [`deploy/remote-access.md`](deploy/remote-access.md)。
 - **MCP 发消息服务**：agent 通过 MCP `send_message`（markdown）发消息（`mcpserver/`）。

@@ -40,4 +40,8 @@ deploy/**/*.env
 # 部署运行时目录（redis 数据 / 日志）
 deploy/**/data/
 deploy/**/logs/
-.venv/*
+.venv/
+
+# 调试/示例产物（渲染出的图、抓下来的样本），不入库
+/*.png
+heatmap/
