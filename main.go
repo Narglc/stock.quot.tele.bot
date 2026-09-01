@@ -15,11 +15,13 @@ import (
 
 	"github.com/narglc/stock.quot.tele.bot/config"
 	"github.com/narglc/stock.quot.tele.bot/dao"
+	"github.com/narglc/stock.quot.tele.bot/domain/claims"
 	"github.com/narglc/stock.quot.tele.bot/handler"
 	"github.com/narglc/stock.quot.tele.bot/mcpserver"
 	logger "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 	"github.com/narglc/stock.quot.tele.bot/schedule"
 	"github.com/narglc/stock.quot.tele.bot/sender"
+	"github.com/narglc/stock.quot.tele.bot/stocks"
 	"github.com/narglc/stock.quot.tele.bot/tts"
 	tele "gopkg.in/telebot.v3"
 )
@@ -100,6 +102,10 @@ func main() {
 	b.Handle("/sticker", handler.Sticker)
 	b.Handle("/price", handler.Price)
 	b.Handle("/liqmap", handler.Liqmap)
+	b.Handle("/watch", handler.Watch)
+	b.Handle("/claim", handler.Claim)
+	b.Handle("/claims", handler.Claims)
+	b.Handle("/resolve", handler.Resolve)
 	b.Handle("/dice", handler.Dice)
 	b.Handle("/gen", handler.Gen)
 	b.Handle("/help", handler.Help)
@@ -113,9 +119,17 @@ func main() {
 	// 注入 /liqmap 用的 Apify token、/gen 用的生图 worker 端点（空则对应命令提示未启用）
 	handler.SetApifyToken(appConfig.Apify.Token)
 	handler.SetImageEndpoint(appConfig.Image.URL, appConfig.Image.Token)
+	// 清算图快照推送端点（配了才推，网页读 Cloudflare KV）
+	stocks.SetLiqPushTarget(appConfig.LiqWeb.URL, appConfig.LiqWeb.Token)
+	// claims 自动检查：store 走 Redis，取价按 symbol 分派到 A股/crypto
+	schedule.SetClaimDeps(claims.NewRedisStore(), handler.ClaimPrice)
 
 	// 从 Redis 恢复已注册群，再启动定时任务（否则重启后 GroupMap 为空、无人收播报）
 	schedule.LoadGroups()
+
+	// 退出信号 context 提前建立：MCP server 要拿它做优雅关停。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// 配置了 target 才启用 MCP：构造 telegram 发送器、注册、起 HTTP 服务
 	// 发送目标：鉴权开启时取 JWT 的 chat_id，否则回落 TargetChatID
@@ -123,20 +137,13 @@ func main() {
 		sender.Register(sender.NewTelegramSender(b))
 		synth := buildSynthesizer(&appConfig.TTS)
 		go func() {
-			if err := mcpserver.Serve(appConfig.MCP.Addr, appConfig.MCP.JWTSecret, appConfig.MCP.TargetChatID, synth); err != nil {
+			if err := mcpserver.Serve(ctx, appConfig.MCP.Addr, appConfig.MCP.JWTSecret, appConfig.MCP.TargetChatID, synth, appConfig.Apify.Token); err != nil {
 				logger.Errorf("MCP server 退出: %v", err)
 			}
 		}()
 	}
 
 	schedule.ScheduleTask(b, appConfig.Apify.Token)
-
-	// go func() {
-	// 	for {
-	// 		stocks.GetStock()
-	// 		time.Sleep(3 * time.Second)
-	// 	}
-	// }()
 
 	// 对话输入框设置默认命令按钮
 	commands := []tele.Command{
@@ -145,6 +152,9 @@ func main() {
 		{Text: "/sticker", Description: "精选表情包"},
 		{Text: "/price", Description: "查行情（可加币种，如 /price btc eth）"},
 		{Text: "/liqmap", Description: "清算图（可加币种，如 /liqmap btc）"},
+		{Text: "/watch", Description: "A股自选（/watch add 600519）"},
+		{Text: "/claim", Description: "记一条带证伪条件的判断"},
+		{Text: "/claims", Description: "看追踪中的判断"},
 		{Text: "/dice", Description: "掷骰子（可选 飞镖/篮球/足球/老虎机/保龄球）"},
 		{Text: "/gen", Description: "AI 生图（/gen a cyberpunk city）"},
 		{Text: "/help", Description: "命令说明"},
@@ -154,10 +164,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// 优雅退出：收到 SIGINT/SIGTERM 时停止长轮询、停定时任务、关 redis。
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+	// 优雅退出：收到 SIGINT/SIGTERM 时停止长轮询、停定时任务（等在途结束）、关 redis。
 	go b.Start()
 	logger.Infof("bot 已启动，等待退出信号…")
 	<-ctx.Done()
@@ -170,9 +177,3 @@ func main() {
 	}
 	logger.Infof("已退出")
 }
-
-// func initScheduler() *cron.Cron {
-// 	c := cron.New()
-// 	c.AddFunc("0 18 * * 1-5", sendGoHomeNotification)
-// 	return c
-// }

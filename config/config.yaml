@@ -23,6 +23,9 @@ apify:
 image:                              # /gen 生图 worker（本地 GPU，经 Tailscale/隧道暴露）
   url: ""                           # IMAGE_URL，如 http://100.x.x.x:5001/gen；留空则 /gen 不可用
   token: ""                         # IMAGE_TOKEN，与 worker 约定的共享密钥（可空）
+liqweb:                             # 清算热力图网页（Cloudflare Worker），留空则不推送快照
+  url: ""                           # LIQWEB_URL，如 https://liqmap.example.workers.dev
+  token: ""                         # LIQWEB_TOKEN，与 Worker 的 PUSH_TOKEN secret 一致
 logger:
   level: "debug"
   logPath: "logs/tele.bog.log"

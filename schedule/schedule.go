@@ -35,16 +35,31 @@ func mustLoadBeijing() *time.Location {
 // cronRunner 持有当前 cron 实例，供优雅退出时 StopTasks 停止。
 var cronRunner *cron.Cron
 
-// StopTasks 停止所有定时任务（优雅退出用）；等待正在执行的任务结束。
+// StopTasks 停止所有定时任务（优雅退出用），并等待正在执行的任务真正结束。
+//
+// 必须等待：cron.Stop() 只是停止调度、立即返回，正在跑的 broadcastCrypto 仍在
+// 访问 Redis。若不等就 CloseRdb()，那个 goroutine 会拿到一个已关闭的客户端。
 func StopTasks() {
-	if cronRunner != nil {
-		cronRunner.Stop()
+	if cronRunner == nil {
+		return
+	}
+	ctx := cronRunner.Stop()
+	select {
+	case <-ctx.Done():
+	case <-time.After(stopTimeout):
+		log.Warnf("等待定时任务结束超时(%s)，继续关闭", stopTimeout)
 	}
 }
 
+// stopTimeout 是优雅退出时等待在途任务的上限，避免某个卡住的任务拖住整个进程退出。
+const stopTimeout = 10 * time.Second
+
 // ScheduleTask 用 cron（东八区）注册所有定时任务并启动。
 //   - 工作日 TaskList 的每个 HH:MM 各一条提醒任务；
-//   - 每小时整点一次 BTC/ETH 行情播报，并在启动时立即播报一次；
+//   - 每小时整点检测一次行情事件（有异动才播报），启动时先跑一次建立基线；
+//   - 每天早八一条完整行情面板（保底心跳）；
+//   - 每交易日 15:05 一次 A股自选股收盘播报；
+//   - 每小时 30 分检查一次 claims 的证伪条件与到期；
 //   - apifyToken 非空时，早八/晚八各一次 BTC 清算图播报。
 func ScheduleTask(bot *telebot.Bot, apifyToken string) {
 	c := cron.New(cron.WithLocation(beijingLoc))
@@ -65,9 +80,25 @@ func ScheduleTask(bot *telebot.Bot, apifyToken string) {
 		}
 	}
 
-	// 每小时整点行情播报。
-	if _, err := c.AddFunc("0 * * * *", func() { broadcastCrypto(bot) }); err != nil {
-		log.Warnf("注册 crypto 播报任务失败: %v", err)
+	// 每小时整点检测行情事件（无异动则静默）。
+	if _, err := c.AddFunc("0 * * * *", func() { checkCryptoAlerts(bot) }); err != nil {
+		log.Warnf("注册行情事件检测任务失败: %v", err)
+	}
+
+	// 每天早八一条完整面板作为保底心跳（纯静默模式下无法区分「没异动」和「bot 挂了」）。
+	if _, err := c.AddFunc("0 8 * * *", func() { dailyDigest(bot) }); err != nil {
+		log.Warnf("注册每日行情面板任务失败: %v", err)
+	}
+
+	// claims 自动检查：每小时一次，与行情事件检测同频。
+	if _, err := c.AddFunc("30 * * * *", func() { checkClaims(bot) }); err != nil {
+		log.Warnf("注册 claims 检查任务失败: %v", err)
+	}
+
+	// A股收盘播报：每交易日 15:05（收盘后 5 分钟，确保拿到定盘数据）。
+	// 节假日靠「全市场无成交」在 broadcastAShare 里再判一次。
+	if _, err := c.AddFunc("5 15 * * 1-5", func() { broadcastAShare(bot) }); err != nil {
+		log.Warnf("注册 A股收盘播报任务失败: %v", err)
 	}
 
 	// 早八/晚八清算图播报（需配置 APIFY_TOKEN）。
@@ -82,10 +113,12 @@ func ScheduleTask(bot *telebot.Bot, apifyToken string) {
 
 	cronRunner = c
 	c.Start()
-	log.Infof("cron 定时任务已启动（时区 %s），共 %d 个提醒 + 每小时行情播报 + 清算图:%v", beijingLoc, len(TaskList), apifyToken != "")
+	log.Infof("cron 定时任务已启动（时区 %s），共 %d 个提醒 + 每小时事件检测 + 每日面板 + 清算图:%v",
+		beijingLoc, len(TaskList), apifyToken != "")
 
-	// 启动后立即播报一次行情，方便验证、避免干等到下一个整点。
-	go broadcastCrypto(bot)
+	// 启动后立即跑一次事件检测：此时没有基线，只会记录当前状态、不产生事件
+	// （见 stocks.DetectAlerts），所以重启不会刷一堆「进入极端区」的误报。
+	go checkCryptoAlerts(bot)
 }
 
 // hhmmToCronSpec 把 "HH:MM" 转成工作日触发的 5 字段 cron 表达式（"M H * * 1-5"）。

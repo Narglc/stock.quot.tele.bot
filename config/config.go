@@ -49,6 +49,13 @@ type ApifyConfig struct {
 	Token string `mapstructure:"token"`
 }
 
+// LiqWebConfig：清算热力图网页（Cloudflare Worker）的快照推送端点。
+// 留空则不推送，/liqmap 照常工作。
+type LiqWebConfig struct {
+	URL   string `mapstructure:"url"`
+	Token string `mapstructure:"token"`
+}
+
 // ImageConfig：/gen 生图 worker 的 HTTP 端点（本地 GPU worker，经 Tailscale/隧道暴露）。
 type ImageConfig struct {
 	URL   string `mapstructure:"url"`
@@ -62,6 +69,7 @@ type Config struct {
 	TTS      TTSConfig      `mapstructure:"tts"`
 	Apify    ApifyConfig    `mapstructure:"apify"`
 	Image    ImageConfig    `mapstructure:"image"`
+	LiqWeb   LiqWebConfig   `mapstructure:"liqweb"`
 	// 日志
 	LoggerConfig logger.LoggerConfig `json:"logger" mapstructure:"logger"`
 }
@@ -97,6 +105,8 @@ func InitConfig(configPath string) (*Config, bool) {
 	_ = viper.BindEnv("apify.token", "APIFY_TOKEN")
 	_ = viper.BindEnv("image.url", "IMAGE_URL")
 	_ = viper.BindEnv("image.token", "IMAGE_TOKEN")
+	_ = viper.BindEnv("liqweb.url", "LIQWEB_URL")
+	_ = viper.BindEnv("liqweb.token", "LIQWEB_TOKEN")
 
 	if err := viper.ReadInConfig(); err != nil {
 		fmt.Printf("config file %s read failed. %v\n", configPath, err)
