@@ -34,6 +34,10 @@ const (
 	maxPicRetry = 3
 )
 
+// picClient 是下载图片共享的 HTTP 客户端。复用同一个 client 才能复用底层连接池，
+// 否则每张图都要重做一次 TCP + TLS 握手。
+var picClient = &http.Client{Timeout: 15 * time.Second}
+
 // errPicTooLarge 表示图片连 Document(50MB) 都装不下，需要跳过换一张。
 var errPicTooLarge = errors.New("pic exceeds telegram document limit")
 
@@ -123,14 +127,24 @@ func OnSticker(c tele.Context) error {
 	log.Infof("sender:[%d - %s] chat:[%d - %s], sticker[%s-%s]\n", user.ID, user.FirstName, chat.ID, chat.Title, sticker.File.FileID, sticker.File.UniqueID)
 
 	// sticker存储到redis
-	err := dao.SaveSticker(sticker.File.FileID)
-	if err == nil {
-		if _, err := c.Bot().Send(user, "你的贡品我收下了！"); err != nil {
-			return err
-		}
+	if err := dao.SaveSticker(sticker.File.FileID); err != nil {
+		log.Warnf("收藏 sticker 失败: %v", err)
+		return nil
 	}
+	return ackTribute(c)
+}
 
-	return nil
+// ackTribute 回一句「收下贡品」的确认。
+//
+// 只在私聊里回：原来无条件 Send(user, ...) 会在群里逐张图私聊发言人——
+// 群里刷个九宫格就私聊九次，而且对方没和 bot 私聊过时这个 Send 必然失败。
+// 群里静默收下即可，日志已经记了。
+func ackTribute(c tele.Context) error {
+	if c.Chat().Type != tele.ChatPrivate {
+		return nil
+	}
+	_, err := c.Bot().Send(c.Chat(), "你的贡品我收下了！")
+	return err
 }
 
 func OnPhoto(c tele.Context) error {
@@ -143,14 +157,11 @@ func OnPhoto(c tele.Context) error {
 	log.Infof("sender:[%d - %s] chat:[%d - %s], text:%+v\n", user.ID, user.FirstName, chat.ID, chat.Title, photo)
 
 	// 图片存储到redis
-	err := dao.SavePhotos(photo.File.FileID)
-	if err == nil {
-		if _, err := c.Bot().Send(user, "你的贡品我收下了！"); err != nil {
-			return err
-		}
+	if err := dao.SavePhotos(photo.File.FileID); err != nil {
+		log.Warnf("收藏图片失败: %v", err)
+		return nil
 	}
-
-	return nil
+	return ackTribute(c)
 }
 
 // picCandidates 是参与随机的图源名单；新增图源在此登记即可参与。
@@ -233,15 +244,13 @@ func Wakeup(c tele.Context) error {
 		Caption: fmt.Sprintf("大师助你提神醒脑\n图源：%s", picSrc),
 	}
 
-	msg, err := c.Bot().Send(chat, photo)
-	if err != nil {
+	if _, err := c.Bot().Send(chat, photo); err != nil {
 		// 内联图片发送失败（可能被 Telegram 判定尺寸/比例不合规），兜底转文件发送
 		log.Warnf("Send %s as photo fail, 转文件重发, err:%+v", picUrl, err)
 		return sendAsDocument(c, chat, picSrc, picUrl, pic.data)
 	}
-	// 图片存储到redis
-	dao.SavePhotos(msg.Photo.File.FileID)
-
+	// 注意：不要把 bot 自己发出去的图再存回收藏集——那个集合本意是「用户送的贡品」，
+	// 自己发的图存进去只会让它无意义地膨胀。
 	return nil
 }
 
@@ -263,8 +272,7 @@ func sendAsDocument(c tele.Context, chat tele.Recipient, src, url string, data [
 // fetchPic 下载图片并判级：≤10MB 且 宽+高≤10000 可内联为图片，否则作为文件发送。
 // 连 50MB 都超返回 errPicTooLarge，让调用方换一张。返回数据可直接上传。
 func fetchPic(url string) (*fetchedPic, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(url)
+	resp, err := picClient.Get(url)
 	if err != nil {
 		return nil, err
 	}
