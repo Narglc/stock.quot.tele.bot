@@ -1,0 +1,18 @@
+name = "liqmap-web"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+
+# 快照存 KV：bot 写、网页读。
+# 创建：wrangler kv namespace create LIQMAP
+# 然后把下面的 id 换成输出里的那个。
+[[kv_namespaces]]
+binding = "LIQMAP"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+[vars]
+# 顶部币种切换标签展示哪些，逗号分隔。只有一个时标签栏自动隐藏。
+# 注意这只控制标签显示：直接访问 /ETH 之类仍然可用（前提是 bot 推过快照）。
+ALLOWED_SYMBOLS = "BTC"
+
+# 写入密钥不放这里，用 secret：
+#   wrangler secret put PUSH_TOKEN
