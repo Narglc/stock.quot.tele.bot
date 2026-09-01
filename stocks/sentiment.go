@@ -1,9 +1,7 @@
 package stocks
 
 import (
-	"encoding/json"
-	"io"
-	"net/http"
+	"errors"
 	"strconv"
 	"time"
 
@@ -59,31 +57,25 @@ type fngResponse struct {
 	} `json:"data"`
 }
 
+// fngCache 缓存恐惧贪婪指数：该指数一天只更新一次，缓存 10 分钟毫无信息损失，
+// 却能挡掉 inline 打字期间的高频重复请求。
+var fngCache = newTTLCache[*FearGreed](10 * time.Minute)
+
 // GetFearGreed 拉取最新的加密恐惧贪婪指数（alternative.me，免费免鉴权）。
 // 属于「best-effort」增强项：失败时上层可忽略、不影响行情播报。
 func GetFearGreed() (*FearGreed, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("https://api.alternative.me/fng/?limit=1")
-	if err != nil {
-		log.Warnf("恐惧贪婪指数请求失败: %v", err)
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Warnf("恐惧贪婪指数读取失败: %v", err)
-		return nil, err
+	if v, ok := fngCache.get("fng"); ok {
+		return v, nil
 	}
 
 	var fng fngResponse
-	if err := json.Unmarshal(body, &fng); err != nil {
-		log.Warnf("恐惧贪婪指数解析失败: %v, body: %s", err, string(body))
+	if err := fetchJSON(marketClient, "恐惧贪婪指数", "https://api.alternative.me/fng/?limit=1", &fng); err != nil {
+		log.Warnf("%v", err)
 		return nil, err
 	}
 	if len(fng.Data) == 0 {
 		log.Warnf("恐惧贪婪指数返回为空")
-		return nil, err
+		return nil, errors.New("恐惧贪婪指数返回为空")
 	}
 
 	v, err := strconv.Atoi(fng.Data[0].Value)
@@ -91,5 +83,8 @@ func GetFearGreed() (*FearGreed, error) {
 		log.Warnf("恐惧贪婪指数值非法 %q: %v", fng.Data[0].Value, err)
 		return nil, err
 	}
-	return &FearGreed{Value: v, Classification: fng.Data[0].ValueClassText}, nil
+
+	res := &FearGreed{Value: v, Classification: fng.Data[0].ValueClassText}
+	fngCache.set("fng", res)
+	return res, nil
 }

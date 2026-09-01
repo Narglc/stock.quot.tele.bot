@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/narglc/stock.quot.tele.bot/utils"
 	"io"
 	"net/http"
 	"strings"
@@ -62,7 +63,7 @@ func (h *HTTPSynthesizer) Synthesize(ctx context.Context, text string) (*Audio, 
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("http tts status %d: %s", resp.StatusCode, truncate(string(data), 200))
+		return nil, fmt.Errorf("http tts status %d: %s", resp.StatusCode, utils.Truncate(string(data), 200))
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("http tts 返回空音频")

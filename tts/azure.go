@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"github.com/narglc/stock.quot.tele.bot/utils"
 	"io"
 	"net/http"
 	"time"
@@ -55,7 +56,7 @@ func (a *AzureSynthesizer) Synthesize(ctx context.Context, text string) (*Audio,
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("azure tts status %d: %s", resp.StatusCode, truncate(string(data), 200))
+		return nil, fmt.Errorf("azure tts status %d: %s", resp.StatusCode, utils.Truncate(string(data), 200))
 	}
 	return &Audio{Data: data, Format: "ogg"}, nil
 }

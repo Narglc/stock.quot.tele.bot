@@ -10,6 +10,7 @@ import (
 	"time"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
+	"github.com/narglc/stock.quot.tele.bot/utils"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -73,17 +74,10 @@ func requestImage(prompt string) ([]byte, error) {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("worker %d: %s", resp.StatusCode, cut(string(data), 150))
+		return nil, fmt.Errorf("worker %d: %s", resp.StatusCode, utils.Truncate(string(data), 150))
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("worker 返回空图片")
 	}
 	return data, nil
-}
-
-func cut(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
 }

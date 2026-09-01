@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/narglc/stock.quot.tele.bot/utils"
 	"os"
 	"os/exec"
 )
@@ -39,7 +40,7 @@ func (e *EdgeSynthesizer) Synthesize(ctx context.Context, text string) (*Audio, 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("edge-tts 合成失败: %v: %s", err, truncate(stderr.String(), 200))
+		return nil, fmt.Errorf("edge-tts 合成失败: %v: %s", err, utils.Truncate(stderr.String(), 200))
 	}
 
 	data, err := os.ReadFile(tmp)

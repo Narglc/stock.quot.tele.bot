@@ -1,9 +1,6 @@
 package utils
 
-import (
-	"math/rand"
-	"time"
-)
+import "math/rand"
 
 // GetRandomResponse 从预定义的字符串切片中随机选择一个字符串并返回
 func GetRandomResponse() string {
@@ -23,9 +20,7 @@ func GetRandomResponse() string {
 }
 
 func GetRandomIndex(size int) int {
-	// 初始化随机数种子
-	rand.Seed(time.Now().UnixNano())
-
-	// 随机选择一个索引
+	// 不需要手动播种：Go 1.20 起全局 rand 自动随机播种，rand.Seed 已废弃。
+	// 且「每次调用重新播种」本身是反模式——同一纳秒内的两次调用会得到相同结果。
 	return rand.Intn(size)
 }

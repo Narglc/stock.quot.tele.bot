@@ -1,10 +1,7 @@
 package stocks
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -30,35 +27,30 @@ type globalResponse struct {
 	} `json:"data"`
 }
 
+// globalCache 缓存全市场概览：总市值/占比变化很慢，60s 内复用足够。
+var globalCache = newTTLCache[*GlobalMarket](60 * time.Second)
+
 // GetGlobalMarket 拉取加密全市场概览（best-effort，失败上层忽略、不影响行情）。
 func GetGlobalMarket() (*GlobalMarket, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("https://api.coingecko.com/api/v3/global")
-	if err != nil {
-		log.Warnf("全市场概览请求失败: %v", err)
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Warnf("全市场概览读取失败: %v", err)
-		return nil, err
+	if v, ok := globalCache.get("global"); ok {
+		return v, nil
 	}
 
 	var g globalResponse
-	if err := json.Unmarshal(body, &g); err != nil {
-		log.Warnf("全市场概览解析失败: %v, body: %s", err, string(body))
+	if err := fetchJSON(marketClient, "全市场概览", "https://api.coingecko.com/api/v3/global", &g); err != nil {
+		log.Warnf("%v", err)
 		return nil, err
 	}
 
-	return &GlobalMarket{
+	res := &GlobalMarket{
 		TotalMarketCap:     g.Data.TotalMarketCap["usd"],
 		TotalVolume24h:     g.Data.TotalVolume["usd"],
 		MarketCapChange24h: g.Data.MarketCapChange24h,
 		BTCDominance:       g.Data.MarketCapPct["btc"],
 		ETHDominance:       g.Data.MarketCapPct["eth"],
-	}, nil
+	}
+	globalCache.set("global", res)
+	return res, nil
 }
 
 // FormatGlobalMarket 把全市场概览排成两行文案，供整点播报附加在行情之后。

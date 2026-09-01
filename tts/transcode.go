@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
+	"github.com/narglc/stock.quot.tele.bot/utils"
 )
 
 // ToOggOpus 确保音频为 Ogg/Opus（Telegram 语音气泡 sendVoice 要的格式）。
@@ -49,7 +50,7 @@ func ffmpegToOgg(ctx context.Context, data []byte) ([]byte, bool) {
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	if err := cmd.Run(); err != nil || out.Len() == 0 {
-		log.Warnf("ffmpeg 转码失败: %v %s", err, truncate(errb.String(), 150))
+		log.Warnf("ffmpeg 转码失败: %v %s", err, utils.Truncate(errb.String(), 150))
 		return nil, false
 	}
 	return out.Bytes(), true

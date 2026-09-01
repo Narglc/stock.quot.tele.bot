@@ -1,11 +1,9 @@
 package stocks
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"math"
-	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,12 +69,13 @@ type CryptoQuote struct {
 	MarketCapRank int     // 市值排名
 
 	// 衍生品指标（OKX 永续，best-effort；0 = 未取到，展示时省略）。
-	OpenInterestUSD float64 // 未平仓合约名义价值（USD）
-	LongShortRatio  float64 // 全市场多空账户比，>1 偏多
-	FundingRate     float64 // 资金费率（如 0.0001=0.01%），正=多头付费
-	FundingKnown    bool    // 是否取到资金费率
-	OIChangePct     float64 // 持仓量相比上次观测的变化百分比
-	OIChangeKnown   bool    // 是否有上次观测可比
+	OpenInterestUSD float64       // 未平仓合约名义价值（USD）
+	LongShortRatio  float64       // 全市场多空账户比，>1 偏多
+	FundingRate     float64       // 资金费率（如 0.0001=0.01%），正=多头付费
+	FundingKnown    bool          // 是否取到资金费率
+	OIChangePct     float64       // 持仓量相比上次观测的变化百分比
+	OIChangeKnown   bool          // 是否有上次观测可比
+	OISpan          time.Duration // 上述变化对应的时间跨度（展示时标出，避免被误读成小时环比）
 }
 
 // coingeckoMarket 对应 /coins/markets 接口的单条返回（只取用得到的字段）。
@@ -104,7 +103,7 @@ func GetCryptoQuotes() ([]CryptoQuote, error) {
 	if err != nil {
 		return nil, err
 	}
-	enrichDerivatives(quotes)
+	enrichDerivatives(quotes, OIScopeBroadcast)
 	return quotes, nil
 }
 
@@ -144,31 +143,38 @@ func GetCryptoQuotesBySymbols(symbols []string, withDerivatives bool) ([]CryptoQ
 		return quotes, unknown, err
 	}
 	if withDerivatives {
-		enrichDerivatives(quotes)
+		enrichDerivatives(quotes, OIScopeQuery)
 	}
 	return quotes, unknown, nil
 }
 
-// enrichDerivatives 并发为每个币种补充 Binance 永续合约的持仓量/多空比（best-effort）。
+// enrichDerivatives 并发为每个币种补充 OKX 永续合约的持仓量/多空比/资金费率（best-effort）。
 // 任一币种失败只是留空对应字段，不影响行情主体。
-func enrichDerivatives(quotes []CryptoQuote) {
+// scope 决定用哪份持仓量基线：播报与用户查询各记一份，互不干扰。
+func enrichDerivatives(quotes []CryptoQuote, scope OIScope) {
 	var wg sync.WaitGroup
 	for i := range quotes {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			if d := fetchDerivatives(quotes[i].Name, quotes[i].Price); d != nil {
+			if d := fetchDerivatives(quotes[i].Name, scope); d != nil {
 				quotes[i].OpenInterestUSD = d.OpenInterestUSD
 				quotes[i].LongShortRatio = d.LongShortRatio
 				quotes[i].FundingRate = d.FundingRate
 				quotes[i].FundingKnown = d.FundingKnown
 				quotes[i].OIChangePct = d.OIChangePct
 				quotes[i].OIChangeKnown = d.OIChangeKnown
+				quotes[i].OISpan = d.OISpan
 			}
 		}(i)
 	}
 	wg.Wait()
 }
+
+// quotesCache 缓存 /coins/markets 的结果。
+// inline 查询是「每敲一个字符触发一次」的高频路径，不缓存极易打满 CoinGecko 免费额度。
+// 30s 对行情播报（每小时）无影响，对 /price 也足够新鲜。
+var quotesCache = newTTLCache[[]CryptoQuote](30 * time.Second)
 
 // fetchQuotes 用 CoinGecko /coins/markets 一次拉取多个币种的量价/动量/位置数据。
 // 无需鉴权，且不受 Binance 的地区限制影响。
@@ -177,27 +183,21 @@ func fetchQuotes(coins []coin) ([]CryptoQuote, error) {
 	for _, c := range coins {
 		ids = append(ids, c.ID)
 	}
+	cacheKey := strings.Join(ids, ",")
+
+	// 命中缓存也要返回副本：调用方（enrichDerivatives）会就地写入衍生品字段，
+	// 直接返回缓存里的切片会让不同 scope 的调用互相污染。
+	if cached, ok := quotesCache.get(cacheKey); ok {
+		return slices.Clone(cached), nil
+	}
+
 	url := "https://api.coingecko.com/api/v3/coins/markets" +
-		"?vs_currency=usd&ids=" + strings.Join(ids, ",") +
+		"?vs_currency=usd&ids=" + cacheKey +
 		"&price_change_percentage=1h,24h,7d,30d"
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		log.Errorf("crypto 行情请求失败: %v", err)
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Errorf("crypto 行情读取失败: %v", err)
-		return nil, err
-	}
-
 	var markets []coingeckoMarket
-	if err := json.Unmarshal(body, &markets); err != nil {
-		log.Errorf("crypto 行情解析失败: %v, body: %s", err, string(body))
+	if err := fetchJSON(marketClient, "crypto 行情", url, &markets); err != nil {
+		log.Errorf("%v", err)
 		return nil, err
 	}
 
@@ -232,6 +232,8 @@ func fetchQuotes(coins []coin) ([]CryptoQuote, error) {
 			MarketCapRank: m.MarketCapRank,
 		})
 	}
+
+	quotesCache.set(cacheKey, slices.Clone(quotes))
 	return quotes, nil
 }
 
@@ -254,7 +256,13 @@ func FormatCryptoMessage(quotes []CryptoQuote, fng *FearGreed) string {
 		if q.OpenInterestUSD > 0 {
 			oi := "持仓 $" + formatCompact(q.OpenInterestUSD)
 			if q.OIChangeKnown {
-				oi += fmt.Sprintf("(%+.1f%%)", q.OIChangePct)
+				// 带上时间跨度：这个变化是「距上次观测」而非固定的小时环比，
+				// 不标出来会被误读（播报间隔 1h，但 /price 的基线取决于上次查询时刻）。
+				if span := formatSpan(q.OISpan); span != "" {
+					oi += fmt.Sprintf("(%+.1f%% / %s)", q.OIChangePct, span)
+				} else {
+					oi += fmt.Sprintf("(%+.1f%%)", q.OIChangePct)
+				}
 			}
 			parts = append(parts, oi)
 		}
@@ -300,6 +308,21 @@ func oiInsight(priceChg, oiChg float64) string {
 		return "↘ 增仓下跌：空头进场施压"
 	default:
 		return "↘ 减仓下跌：多头离场"
+	}
+}
+
+// formatSpan 把时间跨度排成紧凑可读的形式（"42m" / "1.5h" / "2.1d"）。
+// 跨度不可用（零值）时返回空串，调用方据此省略。
+func formatSpan(d time.Duration) string {
+	switch {
+	case d <= 0:
+		return ""
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%.1fh", d.Hours())
+	default:
+		return fmt.Sprintf("%.1fd", d.Hours()/24)
 	}
 }
 

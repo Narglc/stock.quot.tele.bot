@@ -104,11 +104,3 @@ func hardSplit(s string, maxRunes int) []string {
 	}
 	return out
 }
-
-// truncate 截断字符串用于错误日志。
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
-}
