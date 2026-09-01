@@ -12,6 +12,7 @@ import (
 	"time"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
+	"github.com/narglc/stock.quot.tele.bot/utils"
 )
 
 // LiqCluster 是某个价位的清算簇（该价位待爆的名义额，USD）。
@@ -60,27 +61,65 @@ type liqMapResponse struct {
 
 // GetLiqHeatmap 通过 Apify(CoinAnk) 拉取某币种完整清算热力图网格 + OKX 现价。
 // symbol 形如 "BTC"，内部拼成 "BTCUSDT"。apifyToken 走环境/配置传入，勿硬编码。
+//
+// 带 10 分钟缓存 + 同币种串行化（见 liqalbum.go）：Apify actor 单次运行 60~90s
+// 且计费，热力图粒度本身就是 15m，10 分钟内重复拉没有任何新信息。
 func GetLiqHeatmap(symbol, apifyToken string) (*LiqHeatmap, error) {
-	r, err := fetchLiqRaw(symbol, apifyToken)
+	sym, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
-	h, err := buildHeatmap(strings.ToUpper(symbol), r)
+
+	if h, ok := liqCache.get(sym); ok {
+		logLiqCacheHit(sym)
+		return h, nil
+	}
+
+	// 同币种串行：并发穿透意味着多次计费调用。
+	mu := liqLock(sym)
+	mu.Lock()
+	defer mu.Unlock()
+	// 等锁期间别人可能已经填好了缓存，拿到锁后再查一次。
+	if h, ok := liqCache.get(sym); ok {
+		logLiqCacheHit(sym)
+		return h, nil
+	}
+
+	h, err := fetchLiqHeatmap(sym, apifyToken)
 	if err != nil {
 		return nil, err
 	}
-	cur, err := fetchLastPrice(symbol)
+	liqCache.set(sym, h)
+
+	// 只在真的拉到新数据时推快照：缓存命中说明数据没变，推了也是覆盖成同一份。
+	go PushHeatmapSnapshot(h)
+
+	return h, nil
+}
+
+// fetchLiqHeatmap 真正打 Apify 拉一次热力图并补齐现价与 K线（无缓存）。
+// sym 必须是已经过 NormalizeSymbol 的大写符号。
+func fetchLiqHeatmap(sym, apifyToken string) (*LiqHeatmap, error) {
+	r, err := fetchLiqRaw(sym, apifyToken)
 	if err != nil {
-		log.Warnf("清算图取现价失败 %s: %v，回落价格轴中点", symbol, err)
+		return nil, err
+	}
+	h, err := buildHeatmap(sym, r)
+	if err != nil {
+		return nil, err
+	}
+	cur, err := fetchLastPrice(sym)
+	if err != nil {
+		log.Warnf("清算图取现价失败 %s: %v，回落价格轴中点", sym, err)
 		cur = h.Prices[len(h.Prices)/2]
 	}
 	h.CurrentPrice = cur
 
 	// K线（best-effort，用于热力图叠蜡烛）。粒度与热力图一致。
-	if kl, kerr := GetKlines(symbol, klineBar(h.Interval), 300); kerr == nil {
+	if kl, kerr := GetKlines(sym, klineBar(h.Interval), 300); kerr == nil {
 		h.Candles = kl
 	} else {
-		log.Warnf("清算图 K线获取失败 %s: %v", symbol, kerr)
+		log.Warnf("清算图 K线获取失败 %s: %v", sym, kerr)
 	}
 	return h, nil
 }
@@ -94,12 +133,12 @@ func GetLiqMap(symbol, apifyToken string) (*LiqMap, error) {
 	return h.ToMap(), nil
 }
 
-// fetchLiqRaw 调 Apify 同步接口并反序列化出首条有效响应。
+// fetchLiqRaw 调 Apify 同步接口并反序列化出首条有效响应。symbol 须已归一化。
 func fetchLiqRaw(symbol, apifyToken string) (*liqMapResponse, error) {
 	if apifyToken == "" {
 		return nil, fmt.Errorf("apify token 为空")
 	}
-	pair := strings.ToUpper(symbol) + "USDT"
+	pair := symbol + "USDT"
 	url := "https://api.apify.com/v2/acts/api_merge~coinank-liquidation-heatmap/run-sync-get-dataset-items?token=" + apifyToken
 	reqBody, _ := json.Marshal(map[string]string{"symbol": pair})
 	resp, err := apifyClient.Post(url, "application/json", bytes.NewReader(reqBody))
@@ -113,7 +152,7 @@ func fetchLiqRaw(symbol, apifyToken string) (*liqMapResponse, error) {
 	}
 	// Apify run-sync 成功可能返回 200 或 201(Created)，接受整个 2xx。
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("apify bad status %d: %s", resp.StatusCode, truncate(string(raw), 200))
+		return nil, fmt.Errorf("apify bad status %d: %s", resp.StatusCode, utils.Truncate(string(raw), 200))
 	}
 	return parseLiqResponse(raw)
 }
@@ -122,7 +161,7 @@ func fetchLiqRaw(symbol, apifyToken string) (*liqMapResponse, error) {
 func parseLiqResponse(raw []byte) (*liqMapResponse, error) {
 	var arr []liqMapResponse
 	if err := json.Unmarshal(raw, &arr); err != nil {
-		return nil, fmt.Errorf("解析失败: %v, body: %s", err, truncate(string(raw), 200))
+		return nil, fmt.Errorf("解析失败: %v, body: %s", err, utils.Truncate(string(raw), 200))
 	}
 	if len(arr) == 0 || !arr[0].Success {
 		return nil, fmt.Errorf("apify 返回无有效数据")
@@ -195,12 +234,12 @@ func (h *LiqHeatmap) ToMap() *LiqMap {
 	return m
 }
 
-// fetchLastPrice 取某币种 OKX 永续最新价，用于把清算簇拆成现价上/下方。
+// fetchLastPrice 取某币种 OKX 永续最新价，用于把清算簇拆成现价上/下方。symbol 须已归一化。
 func fetchLastPrice(symbol string) (float64, error) {
 	var env okxEnvelope[[]struct {
 		Last string `json:"last"`
 	}]
-	url := "https://www.okx.com/api/v5/market/ticker?instId=" + strings.ToUpper(symbol) + "-USDT-SWAP"
+	url := "https://www.okx.com/api/v5/market/ticker?instId=" + symbol + "-USDT-SWAP"
 	if err := getJSON(url, &env); err != nil {
 		return 0, err
 	}
@@ -232,12 +271,4 @@ func writeClusters(b *strings.Builder, cs []LiqCluster, topN int) {
 	for _, c := range cs {
 		fmt.Fprintf(b, "  $%s  %s\n", FormatPrice(c.Price), formatCompact(c.Value))
 	}
-}
-
-// truncate 截断字符串用于错误日志，避免打印超大 body。
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
 }

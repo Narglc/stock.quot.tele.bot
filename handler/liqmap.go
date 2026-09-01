@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"bytes"
-	"fmt"
 	"strings"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
@@ -12,6 +10,9 @@ import (
 
 // apifyToken 由 main 在启动时经 SetApifyToken 注入，供 /liqmap 拉清算图数据。
 var apifyToken string
+
+// liqTopN 是清算地图文字摘要里上/下方各列出的簇数量。
+const liqTopN = 6
 
 // SetApifyToken 注入 Apify token（空则 /liqmap 提示未启用）。
 func SetApifyToken(t string) { apifyToken = t }
@@ -26,7 +27,7 @@ func Liqmap(c tele.Context) error {
 	if apifyToken == "" {
 		return c.Send("清算图未启用（服务端未配置 APIFY_TOKEN）")
 	}
-	symbol := strings.ToUpper(strings.TrimSpace(c.Message().Payload))
+	symbol := strings.TrimSpace(c.Message().Payload)
 	if symbol == "" {
 		symbol = "BTC"
 	}
@@ -37,29 +38,18 @@ func Liqmap(c tele.Context) error {
 	_ = c.Notify(tele.UploadingPhoto)
 	ph, _ := c.Bot().Send(chat, "⏳ pulling data… 正在拉取清算图")
 
-	h, err := stocks.GetLiqHeatmap(symbol, apifyToken)
+	// 拉数据 + 渲染两张图 + 生成摘要，与定时播报共用同一条链路（含 10min 缓存）。
+	album, err := stocks.BuildLiqAlbum(symbol, apifyToken, liqTopN)
 	if err != nil {
-		log.Warnf("/liqmap %s 拉取失败: %v", symbol, err)
+		log.Warnf("/liqmap %s 失败: %v", symbol, err)
 		return updatePlaceholder(c, ph, "清算图拉取失败 🥲\n原因："+err.Error())
-	}
-	m := h.ToMap()
-
-	heatPNG, err1 := stocks.RenderLiqHeatmapPNG(h)
-	mapPNG, err2 := stocks.RenderLiqMapPNG(m)
-	if err1 != nil || err2 != nil {
-		log.Warnf("/liqmap %s 渲染失败: %v %v", symbol, err1, err2)
-		return updatePlaceholder(c, ph, fmt.Sprintf("清算图渲染失败 🥲\n原因：%v %v", err1, err2))
 	}
 
 	// 成功：删占位消息，发相册。
 	if ph != nil {
 		_ = c.Bot().Delete(ph)
 	}
-	album := tele.Album{
-		&tele.Photo{File: tele.FromReader(bytes.NewReader(heatPNG)), Caption: stocks.FormatLiqMap(m, 6)},
-		&tele.Photo{File: tele.FromReader(bytes.NewReader(mapPNG))},
-	}
-	_, err = c.Bot().SendAlbum(chat, album)
+	_, err = c.Bot().SendAlbum(chat, stocks.LiqAlbumPhotos(album))
 	return err
 }
 
