@@ -43,7 +43,7 @@ type LiqHeatmap struct {
 	Candles      []Candle // 叠加在热力图上的 K线（best-effort，可能为空）
 }
 
-// apifyClient：Apify actor 同步运行较慢（约 60~90s），用长超时。
+// apifyClient：Apify actor 同步运行实测约 10s，但偶发排队会更久，保留长超时。
 var apifyClient = &http.Client{Timeout: 120 * time.Second}
 
 // liqMapResponse 对应 Apify(CoinAnk) actor 返回体（数组取首元素）。
@@ -139,9 +139,17 @@ func fetchLiqRaw(symbol, apifyToken string) (*liqMapResponse, error) {
 		return nil, fmt.Errorf("apify token 为空")
 	}
 	pair := symbol + "USDT"
-	url := "https://api.apify.com/v2/acts/api_merge~coinank-liquidation-heatmap/run-sync-get-dataset-items?token=" + apifyToken
+	// token 走 Authorization 头而不是 ?token= 查询串：
+	// 网络层出错时 Go 的 url.Error 会把完整 URL 带进错误信息，拼在 URL 里等于把 token 打进日志。
+	const url = "https://api.apify.com/v2/acts/api_merge~coinank-liquidation-heatmap/run-sync-get-dataset-items"
 	reqBody, _ := json.Marshal(map[string]string{"symbol": pair})
-	resp, err := apifyClient.Post(url, "application/json", bytes.NewReader(reqBody))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apifyToken)
+	resp, err := apifyClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

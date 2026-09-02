@@ -14,8 +14,8 @@ import (
 
 // liqCache 缓存清算热力图。
 //
-// 为什么这个缓存比别处更重要：Apify 的 CoinAnk actor 单次同步运行要 60~90s，
-// 而且是**计费/计配额**的接口。热力图本身的时间粒度就是 15m——10 分钟内重复拉
+// 为什么这个缓存比别处更重要：Apify 的 CoinAnk actor 是**计费/计配额**的接口
+// （免费档每 UTC 日 5 次），单次实测约 10 秒。热力图本身的时间粒度就是 15m——10 分钟内重复拉
 // 取拿到的是同一份数据，纯属白烧配额。
 //
 // 注意：缓存里存的是 *LiqHeatmap 共享指针。ToMap / RenderLiq*PNG 都只读，
@@ -23,7 +23,7 @@ import (
 var liqCache = newTTLCache[*LiqHeatmap](10 * time.Minute)
 
 // liqInflight 保证同一币种同时只有一个 Apify 请求在跑。
-// 并发穿透在这里代价特别高：两个人同时敲 /liqmap btc 就是两次计费调用 + 两次 90 秒等待。
+// 并发穿透在这里代价特别高：两个人同时敲 /liqmap btc 就是两次计费调用。
 var (
 	liqInflightMu sync.Mutex
 	liqInflight   = map[string]*sync.Mutex{}
@@ -47,7 +47,7 @@ var symbolPattern = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
 // NormalizeSymbol 把用户输入的币种符号归一化成大写形式并校验形状。
 //
 // 校验放在最前面有两个作用：一是避免把用户输入直接拼进第三方接口的查询串，
-// 二是无效输入能立刻被拒，不会白烧一次 Apify 配额（那可是 90 秒 + 计费）。
+// 二是无效输入能立刻被拒，不会白烧一次 Apify 配额。
 func NormalizeSymbol(s string) (string, error) {
 	sym := strings.ToUpper(strings.TrimSpace(s))
 	if !symbolPattern.MatchString(sym) {
