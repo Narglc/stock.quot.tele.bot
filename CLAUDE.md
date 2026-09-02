@@ -40,7 +40,7 @@ go mod tidy
 - `/wakeup [源]` — 从随机图源拉一张图发出；`payload` 为空时随机选源。
 - `/sticker` — 从 Redis 随机取一张收藏的表情包。
 - `/price [币种...]` — 即时查行情（`handler/price.go`）。不带参查默认 BTC/ETH，带参如 `/price btc eth sol` 查指定币种（`stocks.symbolToCoin` 里的符号，大小写不敏感）。与整点播报共用 `stocks` 底层。
-- `/liqmap [币种]` — 清算图（`handler/liqmap.go`）：拉 CoinAnk 热力图 → 纯 Go 渲染热力图+清算地图 PNG 相册。需 `APIFY_TOKEN`（`handler.SetApifyToken` 注入）。**与定时播报共用 `stocks.BuildLiqAlbum`**，别再各写一遍。Apify actor 单次 60~90s 且计费，所以数据层带 10min 缓存 + 同币种串行锁（`stocks/liqalbum.go`），symbol 先过 `NormalizeSymbol` 校验——无效输入不该白烧一次配额。
+- `/liqmap [币种]` — 清算图（`handler/liqmap.go`）：拉 CoinAnk 热力图 → 纯 Go 渲染热力图+清算地图 PNG 相册。需 `APIFY_TOKEN`（`handler.SetApifyToken` 注入）。**与定时播报共用 `stocks.BuildLiqAlbum`**，别再各写一遍。Apify actor 计费且免费档每 UTC 日 5 次（单次实测约 10 秒），所以数据层带 10min 缓存 + 同币种串行锁（`stocks/liqalbum.go`），symbol 先过 `NormalizeSymbol` 校验——无效输入不该白烧一次配额。
 - `/dice [类型]` — 动画骰子/飞镖/篮球/足球/老虎机/保龄球（`handler/dice.go`）；点数由 Telegram 结算，延迟补一句点评。
 - `/gen <描述>` — AI 生图（`handler/gen.go`）：把提示词 POST 给本地 GPU worker，取回图片作为 Photo 发出。需 `IMAGE_URL`（`handler.SetImageEndpoint` 注入），未配置时提示未启用。
 - `/watch [add|del|clear] [代码...]` — A股自选（`handler/watch.go`）。不带参展示自选行情，`add`/`del` 增删、`clear` 清空。列表按 **chat** 存（群共享一份、私聊各自一份），上限 `stocks.MaxWatchlistSize`。
@@ -67,7 +67,7 @@ go mod tidy
   - 数据 = CoinGecko `/coins/markets` + OKX 衍生品 + 全市场概览 + 恐惧贪婪，均 best-effort。`/price` 与面板共用 `stocks.FormatCryptoMessage`。
   - 历史：原来是每小时无条件发完整面板，大部分整点数字并无实质变化，久了就被自动忽略，等于没有播报。
 - A股收盘播报：`5 15 * * 1-5` 调 `broadcastAShare`（`schedule/ashare.go`），逐 chat 播报自选股。cron 的 `1-5` 排得掉周末排不掉节假日，所以再用 `stocks.AnyTraded`（全市场无成交）判一次。
-- 清算图播报：配 `APIFY_TOKEN` 时，`0 8 * * *` 与 `0 20 * * *` 两条独立 cron 各一次 BTC 清算图（`schedule/liqmap.go` → `stocks.BuildLiqAlbum` → 相册）。注意不能写成 `0 8/20 * * *`——那在 cron 语义里是「从 8 点起每 20 小时」，只会命中 8 点。
+- 清算图播报：配 `APIFY_TOKEN` 时，`0 8 * * *` 与 `0 20 * * *` 两条独立 cron 各一次 BTC 清算图（`schedule/liqmap.go` → `stocks.BuildLiqAlbum` → 相册）。注意不能写成 `0 8/20 * * *`——那在 cron 语义里是「从 8 点起每 20 小时」，只会命中 8 点。另有 `0 2,8,14,20 * * *` 刷新网页快照（`refreshLiqSnapshot`），故意与播报对齐到同一分钟以共用 Apify 调用。
 - 发送失败且 `IsBotEvicted` 判定 bot 已被移出时自动 `UnregisterGroup`（提醒与行情共用 `broadcastToGroups`）。
 - 群列表是内存态（`gohome.go:groupMap`，进程重启后由 `LoadGroups()` 从 Redis 恢复），由 `groupMu sync.RWMutex` 保护，只经导出的线程安全函数访问：`RegisterGroup`/`UnregisterGroup`/`IsRegistered`/`GroupCount`/`SnapshotGroupIDs`。广播先 `SnapshotGroupIDs()` 取 id 快照再逐个发送，避免持锁做网络 I/O、以及遍历中调 `UnregisterGroup` 自死锁（并发安全由 `schedule/group_test.go` 的 `-race` 压测覆盖）。
 
@@ -104,7 +104,11 @@ go mod tidy
 - `/claims export` 导出 jsonl，字段名对齐 `claims.jsonl` 的约定（`basis` / `falsify_cond` / `conclusion`）。
 
 ### 清算图网页（deploy/liqmap-web/）
-Cloudflare Worker + KV 的只读网页。主视图是**爆仓地图**：横轴价格、柱子高度=该价位单档清算额（左轴），叠加两条**从现价向两边的累计曲线**（右轴）。累计曲线是这张图的重点——单档量本身说明不了什么，「价格走到这里一共会扫掉多少」才跟决策相关，曲线斜率陡的那段就是密集区。白线现价，右侧红=空头爆仓区、左侧绿=多头爆仓区。最高的几根直接标数值，hover/触摸同时给本档量与累计量。右侧「走到这里会扫掉多少」把 ±1/2/5% 的累计量预先算好（`cumAtPrice`，超出图表范围会标 `+`，否则会被误读成「再远就没有了」）。顶部可切「最近一格 / 累计全部」，热力图作为次要视图保留。`ALLOWED_SYMBOLS` 默认只有 BTC，单币种时标签栏自动隐藏。**bot 是唯一的 Apify 调用方**：拉到新数据后 `stocks.PushHeatmapSnapshot` 推快照给 Worker（`PUT /api/heatmap/:symbol`，`X-Auth-Token` 鉴权），网页只读 KV。让网页直连 Apify 的话每个访客都可能烧一次配额（单次 60~90s 且计费）。快照用稀疏三元组而非稠密数组，体积从几 MB 降到几十 KB。配 `liqweb.url`/`liqweb.token`（`LIQWEB_URL`/`LIQWEB_TOKEN`）才推送，留空则 `/liqmap` 照常工作。
+Cloudflare Worker + KV 的只读网页。**数据性质先搞清楚**：CoinAnk 基于 **Binance 合约**持仓推算的**待爆仓分布**——是预估，不是已成交清算；actor 只覆盖 Binance 一家，输出里没有现价（现价是 bot 拉 Apify 的同一刻从 OKX 取的）。页面顶部标「数据截至」（热力图最后一列时间戳）与「拉取于」两个精确时刻，不用"N 分钟前"。
+
+主视图：横轴价格、柱子高度=该价位单档待爆仓量（左轴），叠加两条**从现价向两边的累计曲线**（右轴）——现价 67000，68000 有 10M、69000 有 20M，曲线在 68000 读 10M、69000 读 30M。这就是用户说的「累计」，**只用最新一个时间格**。曾有过一个"把历史列求和"的视图，是概念错误（每列都是完整快照，同一笔仓位会被重复计算），已删，`latestColumn` 的测试守着这条。右侧 ±1/2/5% 的累计量由 `cumAtPrice` 预先算好，超出图表范围标 `+`。
+
+**bot 是唯一的 Apify 调用方**：拉到新数据后 `stocks.PushHeatmapSnapshot` 推快照给 Worker（`PUT /api/heatmap/:symbol`，`X-Auth-Token` 鉴权），网页只读 KV。快照用稀疏三元组（实测 BTC 一份 715 KB，173 档 × 289 格 ≈ 3 天 × 15m）。刷新时机：`0 2,8,14,20 * * *` 定时（`schedule.refreshLiqSnapshot`，只在配了 `LIQWEB_URL` 时跑，8/20 与播报 cron 同分钟触发共用一次调用）+ 手动 `/liqmap`。**Apify 免费档每 UTC 日 5 次**，定时净消耗 4 次。
 
 ### 数据层（dao/rds.go）
 基于 `redis/go-redis/v9`，全局单例 `rdb`；每次操作走 `opCtx()` 带 5s 超时的 context。`InitRdb` 解析 URL 失败或启动 `Ping` 不通直接 panic（fail-fast）。表情包和图片分别存 Redis Set（`tg:gohome:stickers` / `tg:gohome:pics`），用 `SAdd` 收藏、`SRandMember` 随机取；已注册群存 Hash（`tg:gohome:groups`）。`DefaultSticker` 是取不到时的兜底 fileID。

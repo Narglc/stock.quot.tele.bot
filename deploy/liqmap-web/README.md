@@ -1,23 +1,29 @@
-# liqmap-web —— 清算热力图网页
+# liqmap-web —— 爆仓地图网页
 
 `/liqmap` 发出去的是两张静态 PNG，看不了具体数值。这个 Worker 提供一个可交互的网页版。
 
-主视图是**爆仓地图**：横轴价格，柱子高度是该价位堆积的待爆仓名义额（左轴）。叠加两条
-**累计曲线**（右轴），从当前价分别向两边累计——读的是「价格走到这里，一路上一共会扫掉多少」。
+## 数据是什么（先看这个）
 
-累计曲线比单档柱子有用得多：单个价位堆了多少本身说明不了什么，**曲线斜率陡的那一段**
-才是真正的密集区。hover 会同时给出本档量和从现价累计到该处的总量。
+CoinAnk 基于 **Binance 合约持仓推算的待爆仓分布** —— 是对"价格走到某处会触发多少清算"的
+**预估**，不是已经发生的清算记录。Apify actor `api_merge/coinank-liquidation-heatmap`
+只覆盖 Binance 一家，没有交易所选择参数；BTC 合约 Binance 大约占全市场三成多，
+看的时候别当全市场。
 
-右侧「走到这里会扫掉多少」把 ±1/2/5% 对应的价格和累计量直接算好——这是最常问的问题，
-不该让人自己去图上比划。数值后带 `+` 表示目标价超出了图表覆盖范围，实际只会更多。
+actor 输出里**没有现价字段**，现价是 bot 拉 Apify 的同一刻从 OKX 永续取的，与快照时间一致。
+页面顶部标了两个准确时刻：**数据截至**（热力图最后一列的时间戳）和**拉取于**（bot 什么时候拉的）。
 
-顶部可切「最近一格 / 累计全部」和「地图 / 热力图」。手机上点按图表即可看数值（有触摸支持）。
+## 页面读法
 
-### 币种
+横轴价格，柱子高度是该价位堆积的待爆仓名义额（左轴）。叠加两条**累计曲线**（右轴），
+从当前价分别向两边累加：现价 67,000，68,000 处有 10M、69,000 处有 20M，
+那曲线在 68,000 读 10M、在 69,000 读 30M ——「价格走到这里，一路上一共会扫掉多少」。
 
-`ALLOWED_SYMBOLS` 默认只有 `BTC`，顶部标签栏在只有一个币种时自动隐藏。
-这只控制标签显示——直接访问 `/ETH` 仍然可用，前提是 bot 推过该币种的快照
-（发一次 `/liqmap ETH` 就有了）。
+整张图**只用最新一个时间格**的数据，是「当下」的分布。曾经有过一个"把历史列求和"的
+错误视图，已删：每一列都是那一时刻的完整快照，同一笔仓位没被扫掉就会在每列重复出现，
+求和等于把它算 N 遍。
+
+右侧「走到这里会扫掉多少」把 ±1/2/5% 对应的价格和累计量直接算好。数值后带 `+` 表示
+目标价超出了图表覆盖范围，实际只会更多。手机上点按图表即可看数值。
 
 ## 数据怎么流的
 
@@ -31,30 +37,72 @@ bot ──拉 Apify (10min 缓存)──> 热力图
 
 **关键点：Worker 不持有 `APIFY_TOKEN`，也不会去调 Apify。**
 
-Apify 的 CoinAnk actor 单次运行 60~90 秒且计费。如果让网页直连，每个访客打开页面都可能
+Apify 的 CoinAnk actor 单次运行约 10 秒（实测）且计费。如果让网页直连，每个访客打开页面都可能
 烧掉一次配额——而 bot 侧本来就有 10 分钟缓存和同币种串行锁。所以保持 bot 作为唯一的
 调用方，配额完全可控，Worker 只是个读缓存的壳。
 
-代价是网页数据的新鲜度取决于 bot 上次拉取的时间（页面右上角会显示"N 分钟前更新"）。
-想要刷新，在 Telegram 里发一次 `/liqmap BTC` 即可。定时播报（早八/晚八）也会自动推。
+快照的更新时机：
+- **每 6 小时自动刷新**（北京时间 2 / 8 / 14 / 20 点），其中 8 和 20 点与播报共用一次 Apify 调用；
+- Telegram 里发 `/liqmap BTC` 会立刻拉一次并推上来（10 分钟内重复发命中缓存，不重复推）。
+
+**Apify 配额**：$10 / 1000 次，免费档每 UTC 日只有 5 次。定时任务净消耗 4 次/天
+（02 / 08 / 14 / 20），免费档只剩 1 次留给手动。要频繁手动查得升级 Apify 计划。
 
 ## 部署
 
-```bash
-cd deploy/liqmap-web
-npm i -g wrangler        # 如果还没装
+无 GUI 的服务器上 `wrangler login` 走不通（OAuth 回调要打回本机 `localhost:8976`），用 **API Token**：
 
-# 1. 建 KV namespace，把输出的 id 填进 wrangler.toml
-wrangler kv namespace create LIQMAP
+1. 打开 <https://dash.cloudflare.com/profile/api-tokens> → **Create Token**
+2. 选模板 **Edit Cloudflare Workers**，权限不用改，Continue → Create Token，复制
+3. 写进仓库根的 `deploy/bot.env`（已在 `.gitignore`，本来就是放密钥的地方）：
+   ```
+   CLOUDFLARE_API_TOKEN=xxx
+   ```
+   账号下有多个 account 的话再加一行 `CLOUDFLARE_ACCOUNT_ID=xxx`（dash 首页右侧能看到）
+4. 一键部署：
+   ```bash
+   cd deploy/liqmap-web
+   npm install          # 首次，装 wrangler
+   npm run deploy       # = scripts/deploy.sh
+   ```
 
-# 2. 设写入密钥（bot 侧要用同一个值）
-wrangler secret put PUSH_TOKEN
+脚本是幂等的，按需做四件事：验证凭证 → 建 KV namespace 并把 id 写进 `wrangler.toml` →
+设 `PUSH_TOKEN` secret（没给就生成一个随机值并打印出来）→ `wrangler deploy`。
+重复跑只补缺的步骤。最后会打印 Worker 地址。
 
-# 3. 部署
-wrangler deploy
+`wrangler.toml` 里已经绑了自定义域名 `liqmap.narglc.eu.org`（`routes` 段）。
+**换账号部署要先改成你自己 zone 下的域名，或者删掉 `routes` 段只用 workers.dev。**
+`routes` 是顶层键，必须写在 `[[kv_namespaces]]` / `[vars]` 之前——放到文件末尾会被当成
+`[vars]` 里的一个环境变量，deploy 输出里会出现 `env.routes`，路由却没生效（踩过）。
+
+想自己指定 `PUSH_TOKEN`：`PUSH_TOKEN=你的值 npm run deploy`。
+
+## `*.workers.dev` 打不开？
+
+部署成功但页面超时，先判断是不是网络封锁：DNS 能解析、TCP 443 连不上、而 `api.cloudflare.com`
+秒回——这是 `workers.dev` 在部分网络（国内常见）被整段封锁的典型症状，**不是部署问题**。
+
+后果有两个：**你自己可能打不开页面**；**bot 所在机器如果也在这种网络里，推送快照会失败**
+（日志里会看到 `清算图快照推送失败 ... i/o timeout`）。
+
+解法是给 Worker 绑一个**自己的域名**（Cloudflare 上的 zone），走自己域名的 DNS 和 IP，
+通常不受 workers.dev 封锁影响。在 `wrangler.toml` 加：
+
+```toml
+routes = [
+  { pattern = "liqmap.你的域名", custom_domain = true }
+]
 ```
 
-部署完拿到形如 `https://liqmap-web.<你的账号>.workers.dev` 的地址。
+然后 `npm run deploy`，Cloudflare 会自动配 DNS 和证书。bot 侧 `LIQWEB_URL` 换成新域名。
+
+绕不开时的应急手段：直接通过 API 写 KV（走 api.cloudflare.com，不经过 workers.dev）：
+
+```bash
+npx wrangler kv key put --namespace-id=<KV id> --remote --ttl=86400 "heatmap:BTC" --path=快照.json
+```
+
+注意直写 KV 不会经过 Worker 的 `handlePut`，快照 JSON 里要自己带上 `updatedAt`（毫秒时间戳）。
 
 ## bot 侧配置
 
@@ -89,8 +137,8 @@ liqweb:
 
 ## 快照格式
 
-网格用**稀疏三元组**而非稠密二维数组——热力图绝大多数格子是 0，稠密序列化能到几 MB，
-稀疏通常只有几十 KB：
+网格用**稀疏三元组**而非稠密二维数组。实测 BTC 一份是 173 档 × 289 格、约 3.9 万个非零格、
+715 KB（稠密会到 ~1 MB 且大半是 0）；KV 单值上限 25 MB，余量充足：
 
 ```jsonc
 {
@@ -105,6 +153,28 @@ liqweb:
   "updatedAt": 1735689600000           // Worker 侧写入时补上
 }
 ```
+
+## 本地预览（不用部署就能看）
+
+```bash
+npm run preview          # → dist/preview.html，浏览器直接打开
+```
+
+它用真实的 `worker.js` 渲染页面，再把 `test/fixtures/btc-snapshot.json` 内联进去
+（拦截 `window.fetch`，不改页面源码，所以 `load()` 怎么改都不影响预览）。
+
+### 生成一份真实快照
+
+fixture 是**真实的 Apify 数据**，拉一次存下来反复用（免费档每 UTC 日只有 5 次，别每次看预览都烧一次）：
+
+```bash
+cd ../..    # 回到仓库根目录
+LIVE=1 APIFY_TOKEN=xxx SNAPSHOT_OUT=deploy/liqmap-web/test/fixtures/btc-snapshot.json \
+  go test ./stocks/ -run TestLive_DumpLiqSnapshot -v
+```
+
+落盘的就是 bot 推给 Worker 的那份格式（`stocks.buildSnapshot`），所以预览看到的和线上完全一致。
+想换币种加 `SNAPSHOT_SYMBOL=ETH`。快照文件建议入库，方便在没有 token 的机器上也能看预览、跑测试。
 
 ## 测试
 
