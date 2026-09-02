@@ -1,13 +1,22 @@
 name = "liqmap-web"
 main = "src/worker.js"
 compatibility_date = "2026-01-01"
+workers_dev = true      # 用 *.workers.dev 子域访问
+preview_urls = false    # 不需要每个版本的预览 URL
+
+# 自定义域名：*.workers.dev 在部分网络被整段封锁（实测本机 TCP 443 直接超时），
+# 绑自己的 zone 走自己的 DNS/IP 不受影响。Cloudflare 会自动配 DNS 记录和证书。
+# 命名沿用已有的 mcp.narglc.eu.org 的风格。
+routes = [
+  { pattern = "liqmap.narglc.eu.org", custom_domain = true }
+]
 
 # 快照存 KV：bot 写、网页读。
 # 创建：wrangler kv namespace create LIQMAP
 # 然后把下面的 id 换成输出里的那个。
 [[kv_namespaces]]
 binding = "LIQMAP"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id = "42f56fb0cd91442c9535d7408b5cb05c"
 
 [vars]
 # 顶部币种切换标签展示哪些，逗号分隔。只有一个时标签栏自动隐藏。

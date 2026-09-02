@@ -5,6 +5,10 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "bash scripts/deploy.sh",
+    "preview": "node scripts/preview.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.128.0"
   }
 }
