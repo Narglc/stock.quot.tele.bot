@@ -1,5 +1,8 @@
 /**
- * liqmap-web —— 清算热力图的只读网页。
+ * liqmap-web —— 爆仓地图的只读网页。
+ *
+ * 数据是 CoinAnk 基于 **Binance 合约持仓推算的待爆仓分布**（预估，非已成交清算），
+ * 由 Apify actor api_merge/coinank-liquidation-heatmap 提供，只覆盖 Binance 一家。
  *
  * 数据流：bot 拉 Apify(带 10min 缓存) → PUT 到本 Worker → KV → 网页读 KV。
  * Worker 本身不碰 Apify，也不持有 APIFY_TOKEN：配额只由 bot 侧消耗，完全可控。
@@ -138,7 +141,9 @@ function renderPage(symbol, allowed) {
 
   .price { display:flex; align-items:baseline; gap:8px; margin-left:auto; }
   .price .n { font-size:22px; font-weight:650; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
-  .price .sub { font-size:11px; color:var(--dim2); }
+  .price .sub { font-size:11px; color:var(--dim2); font-variant-numeric:tabular-nums; }
+  .scope { flex-basis:100%; font-size:11.5px; color:var(--dim); line-height:1.6; margin-top:-2px; }
+  .scope b { color:var(--fg); font-weight:600; }
 
   .controls { display:flex; gap:8px; padding:10px 18px 0; flex-wrap:wrap; }
   .seg { display:flex; background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
@@ -204,6 +209,7 @@ function renderPage(symbol, allowed) {
 <header>
   <div class="brand">
     <h1>${symbol} 爆仓地图</h1>
+    <span class="badge">Binance 合约</span>
     <span class="badge" id="intervalBadge">—</span>
   </div>
   ${nav}
@@ -211,13 +217,12 @@ function renderPage(symbol, allowed) {
     <span class="n" id="nowPrice">—</span>
     <span class="sub" id="updated">加载中…</span>
   </div>
+  <div class="scope">
+    预估待爆仓分布（按当前持仓推算），<b>不是</b>已成交的清算记录。现价为拉取快照那一刻的 OKX 永续价。
+  </div>
 </header>
 
 <div class="controls">
-  <div class="seg" id="rangeSeg">
-    <button data-range="last" class="on">最近一格</button>
-    <button data-range="all">累计全部</button>
-  </div>
   <div class="seg" id="viewSeg">
     <button data-view="map" class="on">地图</button>
     <button data-view="heat">热力图</button>
@@ -260,16 +265,18 @@ function renderPage(symbol, allowed) {
       <h2>怎么看</h2>
       <div class="note">
         横轴价格，<b>柱子高度</b>是该价位堆积的待爆仓名义额。<br><br>
-        两条<b>曲线</b>是从当前价往两边的累计量：「价格走到这里，一路上一共会扫掉多少」。
+        两条<b>曲线</b>是从当前价往两边的<b>累计</b>：比如现价 67,000，68,000 处有 10M、69,000 处有 20M，
+        那曲线在 68,000 读 10M、在 69,000 读 30M——「价格走到这里，一路上一共会扫掉多少」。
         单档柱子高不代表什么，<b>曲线斜率陡的那一段</b>才是真正的密集区。<br><br>
-        上表把这件事直接算好了——不用自己去图上找。
+        右上表把这件事直接算好了。<br><br>
+        整张图只用<b>最新一个时间格</b>的数据，是「当下」的分布；页面顶部标了数据截至的准确时刻。
       </div>
     </div>
   </aside>
 </main>
 
 <footer>
-  数据来源 CoinAnk，经 bot 推送；「最近一格」是最新一个时间粒度的快照，「累计全部」是整段时间叠加。<br>
+  数据来源 CoinAnk（Binance 合约，基于持仓推算的待爆仓分布），经 bot 推送，每 6 小时自动刷新一次，Telegram 里发 /liqmap 也会触发。<br>
   两侧数据一并列出，只看一边会得出无法证伪的方向结论。仅供参考，不构成任何建议。
 </footer>
 
@@ -305,21 +312,15 @@ function expandGrid(cells, T, P) {
 }
 
 /**
- * 按价格档位聚合清算额。
- * range='last' 取最新一个时间格；range='all' 把所有时间列累加。
+ * 取最新一个时间格里各价位的待爆仓量——这就是「当下」的爆仓地图。
+ *
+ * 只用最新列，不把历史列相加：每一列都是那一时刻的完整快照，
+ * 同一笔仓位只要没被扫掉就会在连续多列里重复出现，求和等于把它算 N 遍。
  */
-function aggregate(grid, T, P, range) {
+function latestColumn(grid, T, P) {
   const out = new Float64Array(P);
-  if (range === 'last') {
-    const x = T - 1;
-    for (let y = 0; y < P; y++) out[y] = grid[y * T + x];
-  } else {
-    for (let y = 0; y < P; y++) {
-      let s = 0;
-      for (let x = 0; x < T; x++) s += grid[y * T + x];
-      out[y] = s;
-    }
-  }
+  const x = T - 1;
+  for (let y = 0; y < P; y++) out[y] = grid[y * T + x];
   return out;
 }
 
@@ -441,7 +442,7 @@ const ctx = cv.getContext('2d');
 const tip = document.getElementById('tip');
 
 let D = null, grid = null, buckets = [], cum = null, box = null;
-let range = 'last', view = 'map', hoverIdx = -1, raf = 0;
+let view = 'map', hoverIdx = -1, raf = 0;
 
 const PAD = { l: 56, r: 56, t: 16, b: 30 };
 
@@ -727,7 +728,7 @@ cv.addEventListener('touchend', hideTip);
 
 function rebuild() {
   layout();
-  const agg = aggregate(grid, D.times.length, D.prices.length, range);
+  const agg = latestColumn(grid, D.times.length, D.prices.length);
   // 桶数跟着画布宽度走：每根柱子至少 8px 才看得清
   const nb = Math.max(20, Math.min(120, Math.floor(box.w / 9)));
   buckets = bucketize(D.prices, agg, nb);
@@ -778,12 +779,6 @@ function renderSide() {
   }).join('');
 }
 
-document.getElementById('rangeSeg').addEventListener('click', (e) => {
-  const b = e.target.closest('button'); if (!b) return;
-  range = b.dataset.range;
-  [...e.currentTarget.children].forEach(x => x.classList.toggle('on', x === b));
-  rebuild();
-});
 document.getElementById('viewSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   view = b.dataset.view;
@@ -792,22 +787,35 @@ document.getElementById('viewSeg').addEventListener('click', (e) => {
   hoverIdx = -1; hideTip(); draw();
 });
 
+function showEmpty(msg) {
+  document.getElementById('updated').textContent = '暂无快照';
+  document.getElementById('chartWrap').innerHTML = '<div class="empty">' + msg + '</div>';
+  document.getElementById('legend').style.display = 'none';
+}
+
 async function load() {
-  const res = await fetch('/api/heatmap/' + SYMBOL);
+  let res;
+  try {
+    res = await fetch('/api/heatmap/' + SYMBOL);
+  } catch (e) {
+    // 请求本身失败（断网/被拦），不能让页面停在"加载中…"
+    showEmpty('加载失败：' + (e && e.message ? e.message : '网络错误') + '<br>刷新试试');
+    return;
+  }
   if (!res.ok) {
-    document.getElementById('updated').textContent = '暂无快照';
-    document.getElementById('chartWrap').innerHTML =
-      '<div class="empty">还没有 ' + SYMBOL + ' 的快照<br>在 Telegram 里发一次 <b>/liqmap ' + SYMBOL + '</b> 就会推上来</div>';
-    document.getElementById('legend').style.display = 'none';
+    showEmpty('还没有 ' + SYMBOL + ' 的快照<br>在 Telegram 里发一次 <b>/liqmap ' + SYMBOL + '</b> 就会推上来');
     return;
   }
   D = await res.json();
   grid = expandGrid(D.cells, D.times.length, D.prices.length);
 
-  const age = Math.round((Date.now() - D.updatedAt) / 60000);
+  // 两个时间要分开标：数据时刻是热力图最后一列的时间戳（数据本身"截至"何时），
+  // 推送时刻是 bot 什么时候拉的。"N 分钟前"这种相对时间看不出到底是几点的数据。
+  const dataTs = D.times.length ? D.times[D.times.length - 1] : D.updatedAt;
   document.getElementById('nowPrice').textContent = '$' + fmtPrice(D.currentPrice);
-  document.getElementById('updated').textContent = age <= 0 ? '刚刚更新' : age + ' 分钟前更新';
-  document.getElementById('intervalBadge').textContent = D.interval || '—';
+  document.getElementById('updated').textContent =
+    '数据截至 ' + fmtTime(dataTs) + ' · 拉取于 ' + fmtTime(D.updatedAt);
+  document.getElementById('intervalBadge').textContent = (D.interval || '—') + ' 粒度';
 
   rebuild();
 }

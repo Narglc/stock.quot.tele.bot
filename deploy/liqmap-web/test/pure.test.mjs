@@ -20,8 +20,8 @@ const m = src.match(/\/\* --- PURE:START ---[\s\S]*?\*\/([\s\S]*?)\/\* --- PURE:
 assert.ok(m, 'worker.js 里找不到 PURE 标记块——改动时不要删掉那两个标记');
 
 const pure = {};
-new Function(`${m[1]}; Object.assign(this, { fmtNum, fmtPrice, fmtTime, heatColor, expandGrid, aggregate, bucketize, bucketAtX, cumulate, pivotIndex, cumAtPrice });`).call(pure);
-const { fmtNum, fmtPrice, heatColor, expandGrid, aggregate, bucketize, bucketAtX, cumulate, pivotIndex, cumAtPrice } = pure;
+new Function(`${m[1]}; Object.assign(this, { fmtNum, fmtPrice, fmtTime, heatColor, expandGrid, latestColumn, bucketize, bucketAtX, cumulate, pivotIndex, cumAtPrice });`).call(pure);
+const { fmtNum, fmtPrice, heatColor, expandGrid, latestColumn, bucketize, bucketAtX, cumulate, pivotIndex, cumAtPrice } = pure;
 
 test('fmtNum 按量级压缩', () => {
   assert.equal(fmtNum(2.1e9), '2.10B');
@@ -72,19 +72,21 @@ test('expandGrid 丢弃越界格子而不是崩掉', () => {
   assert.equal(g.reduce((a, b) => a + b, 0), 3, '越界数据不应被写入');
 });
 
-test('aggregate last：只取最新一个时间格', () => {
-  // grid 索引 y*T+x，T=3 P=2
+test('latestColumn：只取最新一个时间格', () => {
+  // grid 索引 y*T+x，T=3 P=2：每个价格档有 3 个时间格，取最后一个
   const g = Float64Array.from([1, 2, 3, 10, 20, 30]);
-  const out = aggregate(g, 3, 2, 'last');
-  assert.equal(out[0], 3, '价格档 0 的最后一格');
-  assert.equal(out[1], 30, '价格档 1 的最后一格');
+  const out = latestColumn(g, 3, 2);
+  assert.equal(out[0], 3);
+  assert.equal(out[1], 30);
 });
 
-test('aggregate all：沿时间轴累加', () => {
-  const g = Float64Array.from([1, 2, 3, 10, 20, 30]);
-  const out = aggregate(g, 3, 2, 'all');
-  assert.equal(out[0], 6);
-  assert.equal(out[1], 60);
+// 这条测试守住的是一个曾经犯过的概念错误：把历史列求和当成"累计"。
+// 每列都是那一时刻的完整快照，同一笔仓位没被扫掉就会在每列重复出现，
+// 求和等于把它算 N 遍。正确的"累计"是 cumulate——从现价沿价格轴向外累加。
+test('latestColumn 不把历史列加进来', () => {
+  const g = Float64Array.from([100, 100, 100]); // 同一价位在 3 个时间格里都是 100
+  const out = latestColumn(g, 3, 1);
+  assert.equal(out[0], 100, '应是 100 而不是 300');
 });
 
 test('bucketize 把逐档并成价格桶，总额守恒', () => {
@@ -249,4 +251,54 @@ test('cumAtPrice 与 cumulate 末端一致', () => {
   // 走到最边缘应等于该侧总量
   assert.equal(cumAtPrice(bs, c, 100, 125).value, c[c.length - 1]);
   assert.equal(cumAtPrice(bs, c, 100, 75).value, c[0]);
+});
+
+// ---- 以下用真实快照跑：合成数据能过的不变量，真实分布未必能过 ----
+import { existsSync } from 'node:fs';
+const fixturePath = join(here, 'fixtures/btc-snapshot.json');
+const hasFixture = existsSync(fixturePath);
+const real = hasFixture ? JSON.parse(readFileSync(fixturePath, 'utf8')) : null;
+
+test('真实快照：形状自洽', { skip: !hasFixture && '缺 fixtures/btc-snapshot.json' }, () => {
+  const T = real.times.length, P = real.prices.length;
+  assert.ok(T > 0 && P > 0);
+  for (let i = 1; i < P; i++) assert.ok(real.prices[i] > real.prices[i - 1], '价格轴应严格递增');
+  for (let i = 1; i < T; i++) assert.ok(real.times[i] > real.times[i - 1], '时间轴应严格递增');
+  for (const [x, y, v] of real.cells) {
+    assert.ok(x >= 0 && x < T && y >= 0 && y < P, `格子越界 [${x},${y}]`);
+    assert.ok(v > 0, '稀疏格式里不该有 0 值');
+  }
+  assert.ok(real.currentPrice > real.prices[0] && real.currentPrice < real.prices[P - 1], '现价应落在价格轴范围内');
+});
+
+test('真实快照：整条管线跑通且累计守恒', { skip: !hasFixture && '缺 fixture' }, () => {
+  const T = real.times.length, P = real.prices.length;
+  const grid = expandGrid(real.cells, T, P);
+  const col = latestColumn(grid, T, P);
+  const buckets = bucketize(real.prices, col, 90);
+  const cum = cumulate(buckets, real.currentPrice);
+
+  const colTotal = col.reduce((a, b) => a + b, 0);
+  const bucketTotal = buckets.reduce((a, b) => a + b.value, 0);
+  assert.ok(Math.abs(colTotal - bucketTotal) < 1e-6 * colTotal, '分桶不能丢量');
+
+  const pivot = pivotIndex(buckets, real.currentPrice);
+  const above = buckets.slice(pivot).reduce((a, b) => a + b.value, 0);
+  const below = buckets.slice(0, pivot).reduce((a, b) => a + b.value, 0);
+  assert.ok(Math.abs(cum[buckets.length - 1] - above) < 1e-6 * (above || 1), '右端累计 = 上方总量');
+  assert.ok(pivot === 0 || Math.abs(cum[0] - below) < 1e-6 * (below || 1), '左端累计 = 下方总量');
+  assert.ok(colTotal > 0, '最新列不该全零');
+});
+
+test('真实快照：±5% 累计不超过该侧总量', { skip: !hasFixture && '缺 fixture' }, () => {
+  const T = real.times.length, P = real.prices.length;
+  const buckets = bucketize(real.prices, latestColumn(expandGrid(real.cells, T, P), T, P), 90);
+  const cum = cumulate(buckets, real.currentPrice);
+  const pivot = pivotIndex(buckets, real.currentPrice);
+  const above = buckets.slice(pivot).reduce((a, b) => a + b.value, 0);
+  const below = buckets.slice(0, pivot).reduce((a, b) => a + b.value, 0);
+  const up = cumAtPrice(buckets, cum, real.currentPrice, real.currentPrice * 1.05);
+  const dn = cumAtPrice(buckets, cum, real.currentPrice, real.currentPrice * 0.95);
+  assert.ok(up.value <= above + 1e-6, '+5% 累计不能超过上方总量');
+  assert.ok(dn.value <= below + 1e-6, '-5% 累计不能超过下方总量');
 });
