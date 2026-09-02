@@ -33,3 +33,18 @@ func broadcastLiqmap(bot *telebot.Bot, symbol, apifyToken string) {
 	}
 	log.Infof("清算图播报完成 symbol=%s", symbol)
 }
+
+// refreshLiqSnapshot 定时拉一次热力图，目的只是让网页的快照保持新鲜。
+//
+// 拉取本身会经 GetLiqHeatmap 触发推送（见 stocks/liqmap.go），这里不需要再做什么。
+// 与早八/晚八的播报 cron 对齐到同一分钟时，同币种串行锁 + 10min 缓存保证只打一次 Apify。
+func refreshLiqSnapshot(symbol, apifyToken string) {
+	if apifyToken == "" || !stocks.LiqPushEnabled() {
+		return
+	}
+	if _, err := stocks.GetLiqHeatmap(symbol, apifyToken); err != nil {
+		log.Warnf("定时刷新清算图快照失败 %s: %v", symbol, err)
+		return
+	}
+	log.Infof("定时刷新清算图快照完成 symbol=%s", symbol)
+}

@@ -60,7 +60,8 @@ const stopTimeout = 10 * time.Second
 //   - 每天早八一条完整行情面板（保底心跳）；
 //   - 每交易日 15:05 一次 A股自选股收盘播报；
 //   - 每小时 30 分检查一次 claims 的证伪条件与到期；
-//   - apifyToken 非空时，早八/晚八各一次 BTC 清算图播报。
+//   - apifyToken 非空时，早八/晚八各一次 BTC 清算图播报；
+//     另每 6 小时（2/8/14/20 点）刷新一次网页快照，与播报共用缓存。
 func ScheduleTask(bot *telebot.Bot, apifyToken string) {
 	c := cron.New(cron.WithLocation(beijingLoc))
 
@@ -108,6 +109,13 @@ func ScheduleTask(bot *telebot.Bot, apifyToken string) {
 			if _, err := c.AddFunc(s, func() { broadcastLiqmap(bot, "BTC", apifyToken) }); err != nil {
 				log.Warnf("注册清算图任务失败 %s: %v", s, err)
 			}
+		}
+
+		// 网页快照每 6 小时刷新一次。选 2/8/14/20 而不是 0/6/12/18：
+		// 其中 8 和 20 与播报 cron 同分钟触发，缓存 + 串行锁让它们共用一次 Apify 调用，
+		// 每天净增只有 2 次（02:00 与 14:00）。注意 Apify 免费档每 UTC 日只有 5 次。
+		if _, err := c.AddFunc("0 2,8,14,20 * * *", func() { refreshLiqSnapshot("BTC", apifyToken) }); err != nil {
+			log.Warnf("注册清算图快照刷新任务失败: %v", err)
 		}
 	}
 

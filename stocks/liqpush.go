@@ -30,6 +30,10 @@ func SetLiqPushTarget(url, token string) {
 	liqPushURL, liqPushToken = url, token
 }
 
+// LiqPushEnabled 报告是否配置了快照推送目标。
+// 定时刷新任务据此决定要不要跑：没配网页就没必要为了推快照白烧一次 Apify。
+func LiqPushEnabled() bool { return liqPushURL != "" }
+
 // liqSnapshot 是推给 Worker 的快照格式。
 //
 // 网格用稀疏三元组 [x, y, v] 而不是稠密二维数组：热力图绝大多数格子是 0，
