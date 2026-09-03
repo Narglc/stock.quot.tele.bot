@@ -13,29 +13,44 @@ import (
 
 var claimStore = claims.NewRedisStore()
 
-const claimUsage = `记一条带证伪条件的判断：
+const claimUsage = `📌 记一条带证伪条件的判断
 
+格式（用 | 分段，手机上比 --flag 好打）：
 /claim <判断> | 证伪 <条件> | 到期 <时长> | 依据 <来源>
 
 例：
 /claim BTC 会去扫上方 12.4万 的大簇 | 证伪 BTC<118000 | 到期 3d | 依据 清算地图15m
 
-· 证伪条件写成 BTC<118000 这种形式会被<b>自动检查</b>，一旦触发立刻通知你；
-  写成别的（如"成交量不放大"）也能记，只是到期时由你自己结案。
-· 到期支持 3d / 12h / 2w / 2026-09-10，默认 7 天。
-· 依据可省略。
+各段说明：
+· 判断 —— 必填，你的观点本身
+· 证伪 —— 必填，什么情况下算你错了。没有这段会被拒收：不能证伪的判断等于「偏多/偏空」，涨了算对跌了能找补
+· 到期 —— 可选，默认 7d。支持 3d / 12h / 2w / 2026-09-10
+· 依据 —— 可选，数据来源或推理依据，事后复盘用
+
+证伪条件两种写法：
+① 价格条件：BTC<118000、ETH>=3000、600519<1700
+   支持 万 / w / k 单位（12.4万 = 124000，118k = 118000）
+   这种会被自动检查：每小时一次，一旦触发立刻通知你，判定为错
+② 其它任意文字：如「三天内成交量不放大」
+   照样能记，只是到期时由你自己结案
+
+注意：
+· 到期 ≠ 错。到期只是提醒你来结案，不会自动给结论
+· 被证伪优先于到期：条件先触发的直接判错，不等到期
+· 6 位数字当 A 股代码，其余当币种符号
+· 段前缀中英都认（证伪 / falsify / f），冒号或空格分隔都行
 
 其它命令：
-/claims        看还在追踪的
-/claims all    看全部
-/claims export 导出 jsonl
-/resolve <id> correct|wrong|partial [说明]`
+/claims          看还在追踪的
+/claims all      看全部（含已结案）
+/claims export   导出 jsonl
+/resolve <id> correct|wrong|partial [说明]   结案`
 
 // Claim 处理 /claim：记录一条带证伪条件的判断。
 func Claim(c tele.Context) error {
 	payload := strings.TrimSpace(c.Message().Payload)
 	if payload == "" {
-		return c.Send(claimUsage, tele.ModeHTML)
+		return c.Send(claimUsage)
 	}
 
 	now := time.Now().In(beijingLoc)

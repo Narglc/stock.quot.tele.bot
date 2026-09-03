@@ -155,6 +155,7 @@ func main() {
 		{Text: "/watch", Description: "A股自选（/watch add 600519）"},
 		{Text: "/claim", Description: "记一条带证伪条件的判断"},
 		{Text: "/claims", Description: "看追踪中的判断"},
+		{Text: "/resolve", Description: "给到期的判断结案（/resolve <id> correct|wrong|partial）"},
 		{Text: "/dice", Description: "掷骰子（可选 飞镖/篮球/足球/老虎机/保龄球）"},
 		{Text: "/gen", Description: "AI 生图（/gen a cyberpunk city）"},
 		{Text: "/help", Description: "命令说明"},
