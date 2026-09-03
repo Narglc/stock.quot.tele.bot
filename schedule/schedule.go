@@ -7,6 +7,7 @@ import (
 	"time"
 
 	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
+	"github.com/narglc/stock.quot.tele.bot/stocks"
 	"github.com/robfig/cron/v3"
 	"gopkg.in/telebot.v3"
 )
@@ -121,8 +122,10 @@ func ScheduleTask(bot *telebot.Bot, apifyToken string) {
 
 	cronRunner = c
 	c.Start()
-	log.Infof("cron 定时任务已启动（时区 %s），共 %d 个提醒 + 每小时事件检测 + 每日面板 + 清算图:%v",
-		beijingLoc, len(TaskList), apifyToken != "")
+	// 每个开关单独打出来：排障时能直接从启动日志判断哪条 cron 注册了，
+	// 不用去猜二进制是哪个版本（曾经就因为日志两版一样，误判了部署状态）。
+	log.Infof("cron 定时任务已启动（时区 %s），共 %d 个提醒 + 每小时事件检测 + 每日面板 + 清算图播报:%v + 网页快照6h刷新:%v",
+		beijingLoc, len(TaskList), apifyToken != "", apifyToken != "" && stocks.LiqPushEnabled())
 
 	// 启动后立即跑一次事件检测：此时没有基线，只会记录当前状态、不产生事件
 	// （见 stocks.DetectAlerts），所以重启不会刷一堆「进入极端区」的误报。
