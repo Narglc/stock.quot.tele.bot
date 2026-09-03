@@ -19,6 +19,7 @@ services:
       - ./bot.env            # TOKEN / MCP_TARGET_CHAT_ID / MCP_JWT_SECRET
     environment:
       # docker 内网寻址与监听（这几项由 compose 固定，勿在 bot.env 里改）
+      TZ: Asia/Shanghai       # 日志用北京时间；main.go 内嵌 tzdata，distroless 里也生效
       RDB_URL: redis://redis:6379
       MCP_ADDR: 0.0.0.0:8081  # 仅 docker 内网可达，不 publish 到宿主 = 等价回环
     volumes:

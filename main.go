@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -87,6 +88,9 @@ func main() {
 	pref := tele.Settings{
 		Token:  appConfig.Telegram.Token,
 		Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+		// telebot 默认 HTTP 超时只有 1 分钟。清算图相册是两张 PNG（各 1~2MB），
+		// 从 VPS 传到 api.telegram.org 实测会超过 60s（日志：sendMediaGroup context deadline exceeded）。
+		Client: &http.Client{Timeout: 3 * time.Minute},
 	}
 
 	dao.InitRdb(appConfig.Redis.URL)

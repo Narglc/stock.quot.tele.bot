@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"regexp"
 	"runtime"
 	"sort"
 
@@ -30,14 +31,35 @@ var (
 type Logger log.Entry
 
 func init() {
-	//formatter := &log.TextFormatter{DisableColors:true, FullTimestamp:true, TimestampFormat:"01-02 15:04:05.000"}
-	//formatter = &log.TextFormatter{}
-	formatter := &log.JSONFormatter{TimestampFormat: "15:04:05.000"}
-	//formatter := &MyFomatter{}
-	formatter.TimestampFormat = "2006-01-02 15:04:05.000"
+	formatter := &redactFormatter{next: &log.JSONFormatter{TimestampFormat: "2006-01-02 15:04:05.000"}}
 	basicLogger.Level = log.DebugLevel
 	log.SetFormatter(formatter)
 	basicLogger.Formatter = formatter
+}
+
+// botTokenRe 匹配 Telegram bot token（形如 bot123456789:AAH...）。
+// telebot 把完整请求 URL 塞进 error，任何一次发送失败都会把 token 原样带进日志。
+var botTokenRe = regexp.MustCompile(`bot[0-9]{6,12}:[A-Za-z0-9_-]{30,}`)
+
+// redactFormatter 在最终序列化前把敏感串抹掉。放在 formatter 层而不是每个调用点，
+// 是因为泄露源头（第三方库的 error 文本）不受我们控制，只有出口能兜住。
+type redactFormatter struct{ next log.Formatter }
+
+func (f *redactFormatter) Format(e *log.Entry) ([]byte, error) {
+	e.Message = Redact(e.Message)
+	for k, v := range e.Data {
+		if s, ok := v.(string); ok {
+			e.Data[k] = Redact(s)
+		} else if err, ok := v.(error); ok {
+			e.Data[k] = Redact(err.Error())
+		}
+	}
+	return f.next.Format(e)
+}
+
+// Redact 把文本里的 Telegram bot token 替换成占位符。导出以便别处（如返回给用户的错误文案）复用。
+func Redact(s string) string {
+	return botTokenRe.ReplaceAllString(s, "bot[REDACTED]")
 }
 
 func NewConfig() *LoggerConfig {

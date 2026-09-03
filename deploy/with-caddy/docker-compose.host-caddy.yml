@@ -17,6 +17,7 @@ services:
     restart: unless-stopped
     env_file: [./bot.env]
     environment:
+      TZ: Asia/Shanghai       # 日志用北京时间；main.go 内嵌 tzdata，distroless 里也生效
       RDB_URL: redis://redis:6379
       MCP_ADDR: 0.0.0.0:8081          # 仅内网
     volumes:
