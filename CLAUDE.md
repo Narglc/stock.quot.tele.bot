@@ -44,6 +44,7 @@ go mod tidy
 - `/dice [类型]` — 动画骰子/飞镖/篮球/足球/老虎机/保龄球（`handler/dice.go`）；点数由 Telegram 结算，延迟补一句点评。
 - `/gen <描述>` — AI 生图（`handler/gen.go`）：把提示词 POST 给本地 GPU worker，取回图片作为 Photo 发出。需 `IMAGE_URL`（`handler.SetImageEndpoint` 注入），未配置时提示未启用。
 - `/watch [add|del|clear] [代码...]` — A股自选（`handler/watch.go`）。不带参展示自选行情，`add`/`del` 增删、`clear` 清空。列表按 **chat** 存（群共享一份、私聊各自一份），上限 `stocks.MaxWatchlistSize`。
+- `/claim` / `/claims` / `/resolve` — 判断追踪（`handler/claim.go`，详见下文「判断追踪」）。`/claim` 无参数时回完整用法与注意事项，**纯文本发送**——文案里有 `<判断>` 这类尖括号，用 `ModeHTML` 会被 Telegram 当未知标签拒收（踩过，表现是"没反应"）。三个命令都在 `SetCommands` 菜单里。
 - `/help` — 命令说明（`handler/help.go`）。
 - `OnSticker` / `OnPhoto` — 用户发来的表情包/图片会被"收藏"进 Redis（当作贡品）。**确认消息只在私聊回**（群里静默收下，否则群里刷九宫格会私聊发言人九次，且对方没私聊过 bot 时必然失败）；两个集合都有 `dao.maxCollectionSize` 容量上限，超出随机弹出。
 - `OnMyChatMember` — 监听 bot 自身成员状态：被踢出/移出群时实时 `UnregisterGroup`。
@@ -124,6 +125,8 @@ Cloudflare Worker + KV 的只读网页。**数据性质先搞清楚**：CoinAnk 
 - **鉴权（`mcpserver/jwtauth.go`）**：`mcp.jwt_secret`（`MCP_JWT_SECRET`）非空则启用 JWT Bearer 鉴权，中间件校验 HS256 签名（显式拒 `alg=none`）+ `exp`；为空则免鉴权（仅回环用，向后兼容）。
 - **发送目标**：鉴权开启时目标 = JWT 的 `sub`(chat_id)，经 request context 透传到 handler；免鉴权时回落 `MCP_TARGET_CHAT_ID`。`Sender.Send(md, recipient)` 的 recipient 即目标（Telegram 为 chat_id 字符串）。
 - **签发 token**：`MCP_JWT_SECRET=xxx go run main.go -mktoken <chat_id>`（`mcpserver.SignToken`），打印后退出、不启动 bot。
+- **怎么测**：公网 `narglc.eu.org/mcp` 前面是 mcp-proxy 的 **Google OAuth 门禁**，自签 JWT 过不去（实测 401）。要么在 VPS 上直连 `bot:8081` 跑 `scripts/mcp-smoke.sh`（initialize → tools/list → tools/call，MCP_URL / JWT 环境变量），要么在 claude.ai 里**重连连接器**后看工具列表（MCP 客户端在连接时缓存工具列表，bot 重启后不重连看不到新工具）。`mcpserver/tools_test.go` 用 httptest 走同一套 JSON-RPC 序列，断言 `get_liqmap` 只在配了 `APIFY_TOKEN` 时注册。
+- **get_liqmap 的数据新鲜度**：走 `GetLiqMap` → 进程内 10min 缓存，未命中就打 Apify（**计一次配额**）。它不读 Cloudflare KV。热力图本身覆盖 actor 默认的 3 天、15m 粒度。
 - 多平台扩展：实现 `sender.Sender` 接口（`Send(md, recipient)/Name()`）+ `sender.Register` 即可（如将来的 lark），tool 层无需改动。与图源的注册表模式一脉相承，但 sender 在 `main.go` 运行期注册（依赖 bot 实例），不用 `init()` 自注册。
 
 ## 约定

@@ -197,7 +197,9 @@ func topClusters(cs []stocks.LiqCluster, n int) []liqCluster {
 // synth 非 nil 时额外注册 send_voice 工具（文本转语音发送）。
 // apifyToken 非空时额外注册 get_liqmap 工具（清算图数据查询）。
 // ctx 取消时优雅关停（等待在途请求，最多 shutdownTimeout）。
-func Serve(ctx context.Context, addr, jwtSecret string, defaultTarget int64, synth tts.Synthesizer, apifyToken string) error {
+// newMCPServer 组装 MCP server 并注册工具：send_message 恒有，
+// send_voice 需 synth，get_liqmap 需 apifyToken。抽出来是为了让测试能直接起 httptest。
+func newMCPServer(defaultTarget int64, synth tts.Synthesizer, apifyToken string) *server.MCPServer {
 	s := server.NewMCPServer(
 		"gohome-bot",
 		"1.0.0",
@@ -232,6 +234,12 @@ func Serve(ctx context.Context, addr, jwtSecret string, defaultTarget int64, syn
 		s.AddTool(liqTool, makeLiqmapHandler(apifyToken))
 		log.Infof("MCP get_liqmap 已启用")
 	}
+
+	return s
+}
+
+func Serve(ctx context.Context, addr, jwtSecret string, defaultTarget int64, synth tts.Synthesizer, apifyToken string) error {
+	s := newMCPServer(defaultTarget, synth, apifyToken)
 
 	// 把鉴权中间件注入的 chat_id 从 request context 透传到 tool handler 的 context。
 	httpServer := server.NewStreamableHTTPServer(s,
