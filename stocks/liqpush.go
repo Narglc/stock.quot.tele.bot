@@ -88,21 +88,38 @@ func buildSnapshot(h *LiqHeatmap) *liqSnapshot {
 // PushHeatmapSnapshot 把热力图快照推给 Worker。
 // 未配置端点时静默跳过；失败只记日志，不影响 bot 主流程。
 func PushHeatmapSnapshot(h *LiqHeatmap) {
-	if liqPushURL == "" || h == nil {
+	if h == nil {
 		return
 	}
-
 	snap := buildSnapshot(h)
-	body, err := json.Marshal(snap)
-	if err != nil {
-		log.Warnf("清算图快照序列化失败 %s: %v", h.Symbol, err)
+	pushSnapshot("/api/heatmap/"+h.Symbol, snap,
+		fmt.Sprintf("清算图快照 %s（%d 个非零格）", h.Symbol, len(snap.Cells)))
+}
+
+// PushBriefSnapshot 把盘面快照推给 Worker（网页的指标面板读它）。
+func PushBriefSnapshot(b *MarketBrief) {
+	if b == nil {
+		return
+	}
+	pushSnapshot("/api/brief/"+b.Symbol, b,
+		fmt.Sprintf("盘面快照 %s（health=%v）", b.Symbol, b.Health.OK))
+}
+
+// pushSnapshot 把任意 payload PUT 到 Worker 的指定路径。
+func pushSnapshot(path string, payload any, label string) {
+	if liqPushURL == "" {
 		return
 	}
 
-	url := liqPushURL + "/api/heatmap/" + h.Symbol
-	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+	body, err := json.Marshal(payload)
 	if err != nil {
-		log.Warnf("清算图快照请求构造失败 %s: %v", h.Symbol, err)
+		log.Warnf("%s 序列化失败: %v", label, err)
+		return
+	}
+
+	req, err := http.NewRequest(http.MethodPut, liqPushURL+path, bytes.NewReader(body))
+	if err != nil {
+		log.Warnf("%s 请求构造失败: %v", label, err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -112,7 +129,7 @@ func PushHeatmapSnapshot(h *LiqHeatmap) {
 
 	resp, err := liqPushClient.Do(req)
 	if err != nil {
-		log.Warnf("清算图快照推送失败 %s: %v", h.Symbol, err)
+		log.Warnf("%s 推送失败: %v", label, err)
 		return
 	}
 	defer resp.Body.Close()
@@ -120,9 +137,8 @@ func PushHeatmapSnapshot(h *LiqHeatmap) {
 	if resp.StatusCode != http.StatusOK {
 		var buf bytes.Buffer
 		_, _ = buf.ReadFrom(resp.Body)
-		log.Warnf("清算图快照推送被拒 %s: HTTP %d %s",
-			h.Symbol, resp.StatusCode, utils.Truncate(buf.String(), maxErrBody))
+		log.Warnf("%s 推送被拒: HTTP %d %s", label, resp.StatusCode, utils.Truncate(buf.String(), maxErrBody))
 		return
 	}
-	log.Infof("清算图快照已推送 %s（%d 个非零格，%s）", h.Symbol, len(snap.Cells), fmt.Sprintf("%.1fKB", float64(len(body))/1024))
+	log.Infof("%s 已推送（%.1fKB）", label, float64(len(body))/1024)
 }

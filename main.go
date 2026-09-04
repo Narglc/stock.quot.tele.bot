@@ -107,6 +107,7 @@ func main() {
 	b.Handle("/price", handler.Price)
 	b.Handle("/liqmap", handler.Liqmap)
 	b.Handle("/watch", handler.Watch)
+	b.Handle("/brief", handler.Brief)
 	b.Handle("/claim", handler.Claim)
 	b.Handle("/claims", handler.Claims)
 	b.Handle("/resolve", handler.Resolve)
@@ -157,6 +158,7 @@ func main() {
 		{Text: "/price", Description: "查行情（可加币种，如 /price btc eth）"},
 		{Text: "/liqmap", Description: "清算图（可加币种，如 /liqmap btc）"},
 		{Text: "/watch", Description: "A股自选（/watch add 600519）"},
+		{Text: "/brief", Description: "完整盘面（指标/衍生品/清算簇/宏观）"},
 		{Text: "/claim", Description: "记一条带证伪条件的判断"},
 		{Text: "/claims", Description: "看追踪中的判断"},
 		{Text: "/resolve", Description: "给到期的判断结案（/resolve <id> correct|wrong|partial）"},

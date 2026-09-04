@@ -191,6 +191,25 @@ func topClusters(cs []stocks.LiqCluster, n int) []liqCluster {
 	return out
 }
 
+// makeBriefHandler 构造 get_market_brief 的 handler：返回完整盘面 JSON。
+//
+// 刻意把 health 一起返回：调用方（尤其是定时 agent）**应当先看 health.ok**，
+// 为 false 时只报数据质量问题、不要在这份数据上产出行情判断。
+func makeBriefHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		symbol := req.GetString("symbol", "BTC")
+		b, err := stocks.GetMarketBrief(symbol)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		payload, err := json.Marshal(b)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText(string(payload)), nil
+	}
+}
+
 // Serve 阻塞式启动 Streamable HTTP MCP server（endpoint /mcp）。
 // jwtSecret 非空则启用 JWT Bearer 鉴权，发送目标取 token 里的 chat_id；
 // 为空则免鉴权，发送目标用 defaultTarget。
@@ -223,6 +242,14 @@ func newMCPServer(defaultTarget int64, synth tts.Synthesizer, apifyToken string)
 		s.AddTool(voiceTool, makeVoiceHandler(defaultTarget, synth))
 		log.Infof("MCP send_voice 已启用（TTS provider=%s）", synth.Name())
 	}
+
+	briefTool := mcp.NewTool("get_market_brief",
+		mcp.WithDescription("查询某币种的完整盘面快照：价格/基差、RSI(14)、MA50/MA200、ATR、"+
+			"持仓量及变化、资金费率及其历史百分位、多空比、恐惧贪婪、最近的清算簇、未来 48h 高影响宏观事件、"+
+			"以及各数据源的健康度。**先看 health.ok：为 false 时不要在这份数据上下行情判断，只报数据质量问题。**"),
+		mcp.WithString("symbol", mcp.Description("币种符号，如 BTC / ETH / SOL，默认 BTC")),
+	)
+	s.AddTool(briefTool, makeBriefHandler())
 
 	if apifyToken != "" {
 		liqTool := mcp.NewTool("get_liqmap",
