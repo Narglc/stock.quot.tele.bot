@@ -20,8 +20,8 @@ const m = src.match(/\/\* --- PURE:START ---[\s\S]*?\*\/([\s\S]*?)\/\* --- PURE:
 assert.ok(m, 'worker.js 里找不到 PURE 标记块——改动时不要删掉那两个标记');
 
 const pure = {};
-new Function(`${m[1]}; Object.assign(this, { fmtNum, fmtPrice, fmtTime, heatColor, expandGrid, latestColumn, bucketize, bucketAtX, cumulate, pivotIndex, cumAtPrice });`).call(pure);
-const { fmtNum, fmtPrice, heatColor, expandGrid, latestColumn, bucketize, bucketAtX, cumulate, pivotIndex, cumAtPrice } = pure;
+new Function(`${m[1]}; Object.assign(this, { fmtNum, fmtPrice, fmtTime, heatColor, expandGrid, latestColumn, bucketize, bucketAtX, cumulate, pivotIndex, cumAtPrice, minMax, logPos, indexAtX });`).call(pure);
+const { fmtNum, fmtPrice, heatColor, expandGrid, latestColumn, bucketize, bucketAtX, cumulate, pivotIndex, cumAtPrice, minMax, logPos, indexAtX } = pure;
 
 test('fmtNum 按量级压缩', () => {
   assert.equal(fmtNum(2.1e9), '2.10B');
@@ -301,4 +301,38 @@ test('真实快照：±5% 累计不超过该侧总量', { skip: !hasFixture && '
   const dn = cumAtPrice(buckets, cum, real.currentPrice, real.currentPrice * 0.95);
   assert.ok(up.value <= above + 1e-6, '+5% 累计不能超过上方总量');
   assert.ok(dn.value <= below + 1e-6, '-5% 累计不能超过下方总量');
+});
+
+test('minMax 忽略 0（MA200 未成形时是 0）', () => {
+  const pts = [[1, 10, 0], [2, 20, 15], [3, 5, 12]];
+  assert.deepEqual(minMax(pts, 1), { lo: 5, hi: 20 });
+  assert.deepEqual(minMax(pts, 2), { lo: 12, hi: 15 }, '第一个点的 0 不该被算进去');
+  assert.equal(minMax([[1, 0, 0]], 1), null, '全是 0 应返回 null');
+  assert.equal(minMax([], 1), null);
+});
+
+test('logPos 对数刻度定位', () => {
+  assert.equal(logPos(1, 1, 100), 0);
+  assert.equal(logPos(100, 1, 100), 1);
+  // 对数中点是几何平均数 10，不是算术中点 50.5
+  assert.ok(Math.abs(logPos(10, 1, 100) - 0.5) < 1e-9, '10 应落在正中');
+  assert.ok(logPos(50.5, 1, 100) > 0.8, '算术中点在对数刻度上应偏上');
+  // 非法输入不产生 NaN
+  for (const [v, lo, hi] of [[0, 1, 100], [-1, 1, 100], [10, 0, 100], [10, 100, 1]]) {
+    assert.equal(logPos(v, lo, hi), 0, `logPos(${v},${lo},${hi}) 应安全返回 0`);
+  }
+});
+
+test('indexAtX 等距序列定位', () => {
+  const box = { x: 0, y: 0, w: 100, h: 100 };
+  assert.equal(indexAtX(0, box, 11), 0);
+  assert.equal(indexAtX(100, box, 11), 10);
+  assert.equal(indexAtX(50, box, 11), 5);
+  assert.equal(indexAtX(-5, box, 11), -1, '区域外返回 -1');
+  assert.equal(indexAtX(50, box, 0), -1, '空序列返回 -1');
+  // 每个像素都落在合法范围
+  for (let mx = 0; mx <= 100; mx++) {
+    const i = indexAtX(mx, box, 37);
+    assert.ok(i >= 0 && i < 37, `越界: ${i}`);
+  }
 });

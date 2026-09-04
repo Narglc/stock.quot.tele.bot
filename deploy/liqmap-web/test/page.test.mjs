@@ -51,7 +51,32 @@ test('页面脚本里没有被模板字符串吃掉的转义', async () => {
 
 test('页面带上必要的结构与口径说明', async () => {
   const html = await renderPage();
-  for (const marker of ['briefCard', 'macroCard', 'Binance 合约', '预估待爆仓分布', 'loadBrief()']) {
+  for (const marker of [
+    'id="metrics"',        // 指标条
+    'macroCard',           // 宏观卡片
+    'infoTip',             // 说明浮层
+    'data-view="trend"',   // 长期趋势标签页
+    'data-view="oi"',      // 持仓量标签页
+    'Binance 合约',        // 数据口径
+    '预估待爆仓分布',
+    'loadBrief()', 'loadSeries()',
+  ]) {
     assert.ok(html.includes(marker), `页面缺少 ${marker}`);
+  }
+});
+
+// 每个指标都必须有说明——数字不解释就是噪声。
+test('每个指标条目都挂了说明', async () => {
+  const html = await renderPage();
+  const js = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join('\n');
+
+  // 从 renderMetrics 里抽出用到的 data-tip key
+  const used = [...js.matchAll(/add\('([a-z0-9]+)',/g)].map((m) => m[1]);
+  assert.ok(used.length >= 6, `指标数量偏少: ${used.length}`);
+
+  // 每个 key 都要在 INFO 里有条目
+  const defined = [...js.matchAll(/^  ([a-z0-9]+): \[/gm)].map((m) => m[1]);
+  for (const k of used) {
+    assert.ok(defined.includes(k), `指标 ${k} 没有对应的说明文案`);
   }
 });

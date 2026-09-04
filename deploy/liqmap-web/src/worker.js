@@ -22,7 +22,7 @@ export default {
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
     // 两类快照共用一套读写：heatmap（清算热力图）与 brief（盘面指标）
-    for (const [prefix, kind] of [["/api/heatmap/", "heatmap"], ["/api/brief/", "brief"]]) {
+    for (const [prefix, kind] of [["/api/heatmap/", "heatmap"], ["/api/brief/", "brief"], ["/api/series/", "series"]]) {
       if (!path.startsWith(prefix)) continue;
       const symbol = path.slice(prefix.length).toUpperCase();
       if (!SYMBOL_RE.test(symbol)) return json({ error: "bad symbol" }, 400);
@@ -69,6 +69,9 @@ const SNAPSHOT_KINDS = {
   // 盘面变化快，过期短一些；缺 health 说明推的不是我们认识的格式
   brief:   { ttl: 21600, hint: "missing health",
              required: (b) => b && typeof b === "object" && b.health },
+  // 长周期序列一天才多一个点，给 3 天余量足够扛住偶尔一次推送失败
+  series:  { ttl: 259200, hint: "missing price/oi series",
+             required: (b) => b && (b.price || b.oi) },
 };
 
 /** 写入快照。用固定长度比较避免时序侧信道。 */
@@ -203,6 +206,30 @@ function renderPage(symbol, allowed) {
   table.dist td.px { color:var(--dim); font-size:11.5px; }
   table.dist td.cv { text-align:right; font-weight:600; }
 
+  /* 指标条：横向铺开，放在最上面——数字是先看的东西，不该挤在窄边栏里 */
+  .metrics { display:grid; gap:1px; background:var(--line); border-top:1px solid var(--line);
+    border-bottom:1px solid var(--line);
+    grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); }
+  .metric { background:var(--bg); padding:9px 14px; min-width:0; }
+  .metric .k { font-size:10.5px; color:var(--dim); display:flex; align-items:center; gap:4px; }
+  .metric .v { font-size:17px; font-weight:650; font-variant-numeric:tabular-nums;
+    letter-spacing:-.01em; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .metric .sub { font-size:10.5px; color:var(--dim2); }
+
+  .info { display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px;
+    border:1px solid var(--dim2); border-radius:50%; color:var(--dim2); font-size:9px;
+    font-style:normal; cursor:help; flex:none; user-select:none; }
+  .info:hover { color:var(--fg); border-color:var(--fg); }
+  #infoTip { position:fixed; z-index:50; max-width:330px; opacity:0; pointer-events:none;
+    transition:opacity .1s; background:rgba(14,19,29,.985); border:1px solid #2a3446;
+    border-radius:9px; padding:11px 13px; font-size:12px; line-height:1.75;
+    box-shadow:0 12px 40px rgba(0,0,0,.65); }
+  #infoTip h4 { margin:0 0 5px; font-size:12.5px; color:var(--fg); font-weight:650; }
+  #infoTip p { margin:0 0 6px; color:#b9c2d2; }
+  #infoTip p:last-child { margin-bottom:0; }
+  #infoTip b { color:var(--fg); }
+  #infoTip .warn { color:#f0b429; }
+
   .kv { display:flex; justify-content:space-between; gap:10px; padding:4.5px 0;
     font-size:12.5px; font-variant-numeric:tabular-nums; border-bottom:1px solid rgba(28,36,50,.6); }
   .kv:last-child { border-bottom:0; }
@@ -241,15 +268,21 @@ function renderPage(symbol, allowed) {
   <div class="price">
     <span class="n" id="nowPrice">—</span>
     <span class="sub" id="updated">加载中…</span>
+    <span class="badge-ok" id="healthBadge" hidden></span>
+    <i class="info" data-tip="price">i</i>
   </div>
   <div class="scope">
     预估待爆仓分布（按当前持仓推算），<b>不是</b>已成交的清算记录。现价为拉取快照那一刻的 OKX 永续价。
   </div>
 </header>
 
+<div class="metrics" id="metrics"></div>
+
 <div class="controls">
   <div class="seg" id="viewSeg">
-    <button data-view="map" class="on">地图</button>
+    <button data-view="map" class="on">爆仓地图</button>
+    <button data-view="trend">长期趋势</button>
+    <button data-view="oi">持仓量</button>
     <button data-view="heat">热力图</button>
   </div>
 </div>
@@ -260,7 +293,7 @@ function renderPage(symbol, allowed) {
       <canvas id="cv"></canvas>
       <div id="tip"></div>
     </div>
-    <div class="legend" id="legend">
+      <div class="legend" id="legend">
       <span><i class="bar-l"></i>下跌方向 · 多头爆仓</span>
       <span><i class="bar-s"></i>上涨方向 · 空头爆仓</span>
       <span><i class="ln" style="background:#5ae6a0"></i>向下累计</span>
@@ -270,19 +303,17 @@ function renderPage(symbol, allowed) {
   </div>
 
   <aside>
-    <div class="card" id="briefCard" hidden>
-      <h2>盘面 <span id="briefHealth"></span></h2>
-      <div id="briefBody"></div>
-    </div>
     <div class="card" id="macroCard" hidden>
-      <h2>未来 48h 宏观</h2>
+      <h2>未来 48h 宏观事件（美国）</h2>
       <div id="macroBody"></div>
     </div>
-    <div class="card">
-      <h2>走到这里会扫掉多少</h2>
+    <div class="card liq-only">
+      <h2>走到这里会扫掉多少
+        <i class="info" data-tip="cumdist">i</i>
+      </h2>
       <table class="dist"><tbody id="distTable"></tbody></table>
     </div>
-    <div class="card">
+    <div class="card liq-only">
       <h2>两侧合计</h2>
       <div class="split">
         <div class="stat"><div class="lbl">↓ 下跌方向</div><div class="val long" id="sumBelow">–</div></div>
@@ -290,11 +321,11 @@ function renderPage(symbol, allowed) {
       </div>
       <div class="ratio" id="ratio"></div>
     </div>
-    <div class="card">
+    <div class="card liq-only">
       <h2>清算簇 TOP</h2>
       <div id="clusters"></div>
     </div>
-    <div class="card">
+    <div class="card liq-only">
       <h2>怎么看</h2>
       <div class="note">
         横轴价格，<b>柱子高度</b>是该价位堆积的待爆仓名义额。<br><br>
@@ -307,6 +338,8 @@ function renderPage(symbol, allowed) {
     </div>
   </aside>
 </main>
+
+<div id="infoTip"></div>
 
 <footer>
   数据来源 CoinAnk（Binance 合约，基于持仓推算的待爆仓分布），经 bot 推送，每 6 小时自动刷新一次，Telegram 里发 /liqmap 也会触发。<br>
@@ -439,6 +472,34 @@ function cumAtPrice(buckets, cum, currentPrice, targetPrice) {
   return { value: total, clipped: false };
 }
 
+/** 取序列里第 idx 列的最小/最大值，忽略 <=0（MA200 未成形时是 0）。 */
+function minMax(points, idx) {
+  let lo = Infinity, hi = -Infinity;
+  for (const p of points) {
+    const v = p[idx];
+    if (!(v > 0)) continue;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  return lo === Infinity ? null : { lo, hi };
+}
+
+/**
+ * 对数刻度上的相对位置（0=底 1=顶）。
+ * 5 年 BTC 价格跨了好几倍，线性刻度会把早期低价区压成一条线，看不出结构。
+ */
+function logPos(v, lo, hi) {
+  if (!(v > 0) || !(lo > 0) || !(hi > lo)) return 0;
+  return (Math.log(v) - Math.log(lo)) / (Math.log(hi) - Math.log(lo));
+}
+
+/** 鼠标 x 坐标 → 序列索引（等距点）。 */
+function indexAtX(mx, box, n) {
+  if (n <= 0 || mx < box.x || mx > box.x + box.w) return -1;
+  const i = Math.round(((mx - box.x) / box.w) * (n - 1));
+  return Math.min(n - 1, Math.max(0, i));
+}
+
 /** 鼠标 x 坐标 → 桶索引。价格轴从左到右递增。 */
 function bucketAtX(mx, box, n) {
   if (mx < box.x || mx > box.x + box.w) return -1;
@@ -474,7 +535,7 @@ const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
 const tip = document.getElementById('tip');
 
-let D = null, grid = null, buckets = [], cum = null, box = null;
+let D = null, B = null, S = null, grid = null, buckets = [], cum = null, box = null;
 let view = 'map', hoverIdx = -1, raf = 0;
 
 const PAD = { l: 56, r: 56, t: 16, b: 30 };
@@ -506,10 +567,118 @@ function scheduleDraw() {
 }
 
 function draw() {
-  if (!D) return;
   layout();
   ctx.clearRect(0, 0, cv.width, cv.height);
+  if (view === 'trend') return drawSeries('price');
+  if (view === 'oi') return drawSeries('oi');
+  if (!D) return;
   view === 'heat' ? drawHeat() : drawMap();
+}
+
+/**
+ * 长周期曲线。price：收盘价 + MA200，对数刻度（5 年跨好几倍，线性会把早期压成一条线）。
+ * oi：持仓量，线性刻度。
+ */
+function drawSeries(kind) {
+  const src = kind === 'price' ? (S && S.price) : (S && S.oi);
+  if (!src || !src.points || src.points.length < 2) {
+    ctx.fillStyle = '#79839a';
+    ctx.font = '13px -apple-system,sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(S ? '暂无数据' : '加载中…', box.x + box.w / 2, box.y + box.h / 2);
+    return;
+  }
+  const pts = src.points;
+  const n = pts.length;
+  const useLog = kind === 'price';
+
+  // price 图要把收盘价和 MA200 一起纳入范围
+  const a = minMax(pts, 1);
+  const b2 = kind === 'price' ? minMax(pts, 2) : null;
+  let lo = a.lo, hi = a.hi;
+  if (b2) { lo = Math.min(lo, b2.lo); hi = Math.max(hi, b2.hi); }
+  if (useLog) { lo *= 0.95; hi *= 1.05; } else { lo = 0; hi *= 1.08; }
+
+  const yOf = (v) => box.y + box.h - (useLog ? logPos(v, lo, hi) : (v - lo) / (hi - lo)) * box.h;
+  const xOf = (i) => box.x + (i / (n - 1)) * box.w;
+
+  // 网格与纵轴
+  ctx.font = '10.5px ui-monospace,monospace';
+  ctx.fillStyle = '#4d5668';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  for (let t = 0; t <= 4; t++) {
+    const v = useLog ? Math.exp(Math.log(lo) + (Math.log(hi) - Math.log(lo)) * t / 4) : lo + (hi - lo) * t / 4;
+    const y = yOf(v);
+    ctx.strokeStyle = t === 0 ? 'rgba(40,50,68,.9)' : 'rgba(28,36,50,.5)';
+    ctx.beginPath(); ctx.moveTo(box.x, y); ctx.lineTo(box.x + box.w, y); ctx.stroke();
+    ctx.fillText(kind === 'price' ? fmtPrice(v) : fmtNum(v), box.x - 7, y);
+  }
+
+  const line = (idx, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < n; i++) {
+      const v = pts[i][idx];
+      if (!(v > 0)) continue;
+      const x = xOf(i), y = yOf(v);
+      started ? ctx.lineTo(x, y) : (ctx.moveTo(x, y), started = true);
+    }
+    ctx.stroke();
+  };
+
+  if (kind === 'price') {
+    line(1, 'rgba(120,180,255,.95)', 1.5);          // 收盘价
+    line(2, 'rgba(240,180,60,.95)', 2);             // MA200
+  } else {
+    // 持仓量画成带填充的面积，强调"体量"
+    ctx.beginPath();
+    ctx.moveTo(xOf(0), box.y + box.h);
+    for (let i = 0; i < n; i++) ctx.lineTo(xOf(i), yOf(pts[i][1]));
+    ctx.lineTo(xOf(n - 1), box.y + box.h); ctx.closePath();
+    ctx.fillStyle = 'rgba(120,180,255,.12)'; ctx.fill();
+    line(1, 'rgba(120,180,255,.95)', 2);
+  }
+
+  // 时间轴
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#4d5668';
+  const ticks = Math.max(2, Math.min(7, Math.floor(box.w / 110)));
+  for (let t = 0; t <= ticks; t++) {
+    const i = Math.round((n - 1) * t / ticks);
+    const d = new Date(pts[i][0]);
+    const label = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    ctx.fillText(label, Math.min(Math.max(xOf(i), box.x + 28), box.x + box.w - 28), box.y + box.h + 8);
+  }
+
+  drawSeriesHover(kind, pts, n, xOf, yOf);
+  drawSeriesLegend(kind);
+}
+
+function drawSeriesLegend(kind) {
+  const items = kind === 'price'
+    ? [['rgba(120,180,255,.95)', '收盘价'], ['rgba(240,180,60,.95)', 'MA200']]
+    : [['rgba(120,180,255,.95)', '持仓量（OKX，日线）']];
+  ctx.font = '11px -apple-system,sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  let x = box.x + 6;
+  for (const [c, label] of items) {
+    ctx.fillStyle = c; ctx.fillRect(x, box.y + 7, 12, 2);
+    ctx.fillStyle = '#79839a'; ctx.fillText(label, x + 17, box.y + 8);
+    x += ctx.measureText(label).width + 34;
+  }
+}
+
+function drawSeriesHover(kind, pts, n, xOf, yOf) {
+  if (hoverIdx < 0 || hoverIdx >= n) return;
+  const x = xOf(hoverIdx);
+  ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x, box.y); ctx.lineTo(x, box.y + box.h); ctx.stroke();
+  for (const idx of (kind === 'price' ? [1, 2] : [1])) {
+    const v = pts[hoverIdx][idx];
+    if (!(v > 0)) continue;
+    ctx.fillStyle = idx === 1 ? 'rgba(120,180,255,1)' : 'rgba(240,180,60,1)';
+    ctx.beginPath(); ctx.arc(x, yOf(v), 3, 0, Math.PI * 2); ctx.fill();
+  }
 }
 
 function drawMap() {
@@ -717,6 +886,7 @@ function drawHeat() {
 
 /** 指针位置 → 更新 hover 状态与 tooltip。鼠标和触摸共用。 */
 function onPointer(clientX, clientY) {
+  if (view === 'trend' || view === 'oi') return onSeriesPointer(clientX, clientY);
   if (!D || view !== 'map' || !buckets.length) return hideTip();
   const r = cv.getBoundingClientRect();
   const mx = clientX - r.left, my = clientY - r.top;
@@ -740,6 +910,40 @@ function onPointer(clientX, clientY) {
   tip.style.left = Math.min(Math.max(mx - tw / 2, 4), r.width - tw - 4) + 'px';
   tip.style.top = Math.max(my - th - 14, 4) + 'px';
 
+  if (i !== hoverIdx) { hoverIdx = i; scheduleDraw(); }
+}
+
+/** 长期图的 hover：给出该日的精确数值。 */
+function onSeriesPointer(clientX, clientY) {
+  const src = view === 'trend' ? (S && S.price) : (S && S.oi);
+  if (!src || !src.points || !src.points.length) return hideTip();
+  const pts = src.points;
+  const r = cv.getBoundingClientRect();
+  const mx = clientX - r.left, my = clientY - r.top;
+  const i = indexAtX(mx, box, pts.length);
+  if (i < 0 || my < box.y || my > box.y + box.h) return hideTip();
+
+  const p = pts[i];
+  const d = new Date(p[0]);
+  const pad = (x) => String(x).padStart(2, '0');
+  let html = '<div class="p">' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '</div>';
+  if (view === 'trend') {
+    html += '<div class="line"><span class="k">收盘</span> <span class="v">$' + fmtPrice(p[1]) + '</span></div>';
+    if (p[2] > 0) {
+      const dev = (p[1] - p[2]) / p[2] * 100;
+      html += '<div class="line"><span class="k">MA200</span> <span class="v">$' + fmtPrice(p[2]) + '</span></div>' +
+        '<div class="line"><span class="k">偏离</span> <span class="v" style="color:' +
+        (dev >= 0 ? 'var(--long)' : 'var(--short)') + '">' + (dev >= 0 ? '+' : '') + dev.toFixed(1) + '%</span></div>';
+    }
+  } else {
+    html += '<div class="line"><span class="k">持仓量</span> <span class="v">$' + fmtNum(p[1]) + '</span></div>';
+    if (p[2] > 0) html += '<div class="line"><span class="k">成交额</span> <span class="v">$' + fmtNum(p[2]) + '</span></div>';
+  }
+  tip.innerHTML = html;
+  tip.style.opacity = 1;
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = Math.min(Math.max(mx - tw / 2, 4), r.width - tw - 4) + 'px';
+  tip.style.top = Math.max(my - th - 14, 4) + 'px';
   if (i !== hoverIdx) { hoverIdx = i; scheduleDraw(); }
 }
 
@@ -816,7 +1020,10 @@ document.getElementById('viewSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   view = b.dataset.view;
   [...e.currentTarget.children].forEach(x => x.classList.toggle('on', x === b));
-  document.getElementById('legend').style.display = view === 'heat' ? 'none' : '';
+  // 清算图专属的几张卡片只在相关标签页显示，否则是干扰
+  const liqView = view === 'map' || view === 'heat';
+  document.querySelectorAll('.liq-only').forEach((el) => { el.hidden = !liqView; });
+  document.getElementById('legend').style.display = view === 'map' ? '' : 'none';
   hoverIdx = -1; hideTip(); draw();
 });
 
@@ -853,63 +1060,164 @@ async function load() {
   rebuild();
 }
 
+/**
+ * 每个指标的说明。写清楚三件事：**是什么、怎么算、怎么用**，
+ * 以及它不能说明什么——后者往往比前者更重要。
+ */
+const INFO = {
+  rsi: ['RSI(14) 相对强弱指标',
+    '把最近 14 天的平均涨幅和平均跌幅相比，换算成 0~100 的数。用 Wilder 平滑，和 TradingView 一致。',
+    '<b>怎么用</b>：传统上 &gt;70 叫超买、&lt;30 叫超卖。',
+    '<span class="warn">但强趋势里 RSI 可以在 70 以上待好几周</span>，"超买"不等于要跌，它只说明近期涨得比跌得多，不说明贵不贵。'],
+  ma200: ['距 MA200',
+    '现价相对 200 日均线的偏离百分比。MA200 是常用的牛熊分界线。',
+    '<b>怎么用</b>：正值说明在长期均线之上，负值在其下。偏离越大，均值回归的拉力理论上越强。',
+    '<span class="warn">但偏离可以持续很久</span>——2021 年 BTC 在 MA200 上方 +100% 待了两个月。它是位置参照，不是择时信号。'],
+  atr: ['ATR(14) 平均真实波幅',
+    '最近 14 天平均每天波动多大，含跳空缺口。换算成百分比更好比较。',
+    '<b>怎么用</b>：它是"多远算远"的标尺。ATR 2.9% 意味着一天内价格走 3% 属于正常波动。',
+    '所以 ① 判断某个价位是"够得着"还是"随手就能到"；② 设止损或证伪条件时，<b>设在 0.5×ATR 以内的条件测的是噪声不是判断</b>。',
+    'ATR 不看方向，只看幅度。'],
+  basis: ['基差 Basis',
+    '（永续合约价 − 现货价）÷ 现货价。这里用 OKX 的两个价格。',
+    '<b>正（升水）</b>：合约比现货贵，杠杆多头愿意付溢价，情绪偏热。',
+    '<b>负（贴水）</b>：合约比现货便宜，通常是空头占优或现货有抛压。',
+    '<b>怎么用</b>：它和价格涨跌是两回事。价格在涨但基差转负，说明这波是现货买盘推的、杠杆没跟上——性质和杠杆推动的上涨完全不同。'],
+  oi: ['持仓量 Open Interest（OI）',
+    '市场上尚未平仓的合约总名义价值。<span class="warn">注意是 OI，不是 IO。</span>',
+    '<b>怎么用</b>：<b>单看数值几乎没有意义</b>，必须看变化方向，且要和价格方向组合起来读：',
+    '· 增仓上涨 = 新多进场，趋势相对健康<br>· 减仓上涨 = 空头回补，追高要谨慎<br>· 增仓下跌 = 空头进场施压<br>· 减仓下跌 = 多头离场',
+    '切到「持仓量」标签页可以看 180 天曲线——那才看得出当前是高位还是低位。',
+    '<span class="warn">本站显示的是 OKX 单家，不是全市场。</span>'],
+  funding: ['资金费率 Funding Rate',
+    '永续合约每 8 小时结算一次的多空互付费用，作用是把合约价格拉回现货。',
+    '<b>正</b>：多头付给空头，做多的更多或更急。<b>负</b>：反之。',
+    '<b>怎么用</b>：<b>看百分位比看绝对值重要得多</b>。0.01% 听起来很小，但如果是过去 33 天的第 95 百分位，说明杠杆多头已经拥挤到极值；反过来费率为正但只在第 3 百分位，说明杠杆情绪其实是冷的。',
+    '括号里的百分位就是这个意思，基准是最近约 33 天（100 次结算）。'],
+  lsr: ['多空比 Long/Short Ratio',
+    'OKX 上持多头仓位的<b>账户数</b> ÷ 持空头仓位的账户数。',
+    '<span class="warn">是账户数量的比值，不是持仓金额的比值</span>——一个大户和一个散户各算一个账户。',
+    '<b>怎么用</b>：&gt;1 表示做多的账户更多。常被当<b>反向指标</b>：某一侧极端拥挤时，那一侧更容易被清算，因为止损单密集。'],
+  fng: ['恐惧贪婪指数',
+    '0~100 的市场情绪综合指标，由波动率、成交量、社交热度、市场占比等加权而成（来源 alternative.me）。',
+    '&lt;25 极度恐惧，&gt;75 极度贪婪。',
+    '<b>怎么用</b>：常作为反向参考——极度恐惧时往往接近阶段底，极度贪婪时风险累积。但它反应偏慢，且极端值可以维持很久。'],
+  price: ['现价',
+    'OKX 永续合约最新价。',
+    '页面右上角还标了两个时刻：<b>数据截至</b>是清算图最后一列的时间戳，<b>拉取于</b>是 bot 什么时候取的这份数据。'],
+  cumdist: ['累计清算量',
+    '从现价往某个方向走，一路上会累计扫过多少待爆仓量。',
+    '例：现价 80,000，81,000 有 1 亿、82,000 有 2 亿，那么走到 82,000 的累计值是 3 亿。',
+    '数值后面带 <b>+</b> 表示目标价已超出图表覆盖范围，实际只会更多。'],
+};
+
+/** 说明浮层：桌面悬停显示，移动端点按显示。 */
+const tipBox = document.getElementById('infoTip');
+let tipSticky = false;
+
+function showInfo(key, x, y) {
+  const d = INFO[key];
+  if (!d) return;
+  tipBox.innerHTML = '<h4>' + d[0] + '</h4>' + d.slice(1).map((p) => '<p>' + p + '</p>').join('');
+  tipBox.style.opacity = 1;
+  const w = tipBox.offsetWidth, h = tipBox.offsetHeight;
+  tipBox.style.left = Math.min(Math.max(x - w / 2, 8), window.innerWidth - w - 8) + 'px';
+  tipBox.style.top = (y + h + 16 > window.innerHeight ? y - h - 12 : y + 18) + 'px';
+}
+function hideInfo() { if (!tipSticky) tipBox.style.opacity = 0; }
+
+document.addEventListener('mouseover', (e) => {
+  const el = e.target.closest('[data-tip]');
+  if (el && !tipSticky) { const r = el.getBoundingClientRect(); showInfo(el.dataset.tip, r.left + r.width / 2, r.bottom); }
+});
+document.addEventListener('mouseout', (e) => { if (e.target.closest('[data-tip]')) hideInfo(); });
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-tip]');
+  if (!el) { tipSticky = false; tipBox.style.opacity = 0; return; }
+  const r = el.getBoundingClientRect();
+  tipSticky = false;
+  showInfo(el.dataset.tip, r.left + r.width / 2, r.bottom);
+  tipSticky = true;
+  e.stopPropagation();
+});
+
+/** 指标条：把关键数字横向铺在最上面。 */
+function renderMetrics() {
+  if (!B) return;
+  const pct = (v, d = 1) => (v >= 0 ? '+' : '') + v.toFixed(d) + '%';
+  const cells = [];
+  const add = (key, label, value, sub, cls) => cells.push(
+    '<div class="metric"><div class="k">' + label + ' <i class="info" data-tip="' + key + '">i</i></div>' +
+    '<div class="v ' + (cls || '') + '">' + value + '</div>' +
+    (sub ? '<div class="sub">' + sub + '</div>' : '') + '</div>');
+
+  if (B.rsi14) {
+    const cls = B.rsi14 >= 70 ? 'short' : (B.rsi14 <= 30 ? 'long' : '');
+    add('rsi', 'RSI(14)', B.rsi14.toFixed(1), B.rsi14 >= 70 ? '超买区' : (B.rsi14 <= 30 ? '超卖区' : '中性'), cls);
+  }
+  if (B.vs_ma200_pct) add('ma200', '距 MA200', pct(B.vs_ma200_pct), 'MA200 $' + fmtPrice(B.ma200 || 0),
+    B.vs_ma200_pct >= 0 ? 'long' : 'short');
+  if (B.atr_pct) add('atr', 'ATR(14)', B.atr_pct.toFixed(2) + '%', '日均波幅 $' + fmtNum(B.atr14 || 0));
+  if (B.basis_pct) add('basis', '基差', pct(B.basis_pct, 3), B.basis_pct >= 0 ? '合约升水' : '合约贴水',
+    B.basis_pct >= 0 ? 'long' : 'short');
+  if (B.open_interest_usd) {
+    add('oi', '持仓量', '$' + fmtNum(B.open_interest_usd),
+      B.oi_change_pct ? pct(B.oi_change_pct) + ' / ' + B.oi_span_minutes + '分钟' : '仅 OKX');
+  }
+  if (B.funding_rate) {
+    const p = Math.round(B.funding_percentile || 0);
+    add('funding', '资金费率', (B.funding_rate * 100 >= 0 ? '+' : '') + (B.funding_rate * 100).toFixed(4) + '%',
+      p + ' 百分位' + (p >= 90 ? '（极高）' : p <= 10 ? '（极低）' : ''),
+      p >= 90 ? 'short' : (p <= 10 ? 'long' : ''));
+  }
+  if (B.long_short_ratio) add('lsr', '多空比', B.long_short_ratio.toFixed(2),
+    B.long_short_ratio >= 1 ? '多头账户更多' : '空头账户更多');
+  if (B.fear_greed) add('fng', '恐惧贪婪', String(B.fear_greed), B.fear_greed_label || '');
+
+  document.getElementById('metrics').innerHTML = cells.join('');
+}
+
 /** 盘面快照与热力图相互独立：brief 拿不到不该影响爆仓地图。 */
 async function loadBrief() {
-  let B;
   try {
     const res = await fetch('/api/brief/' + SYMBOL);
     if (!res.ok) return;
     B = await res.json();
   } catch { return; }
 
-  const pct = (v, d = 1) => (v >= 0 ? '+' : '') + v.toFixed(d) + '%';
-  const rows = [];
-  const push = (k, v, cls) => rows.push(
-    '<div class="kv"><span class="k">' + k + '</span><span class="v ' + (cls || '') + '">' + v + '</span></div>');
+  renderMetrics();
 
-  if (B.rsi14) {
-    // 传统超买超卖线，只标注状态，不给操作建议
-    const cls = B.rsi14 >= 70 ? 'short' : (B.rsi14 <= 30 ? 'long' : '');
-    const tag = B.rsi14 >= 70 ? '（超买区）' : (B.rsi14 <= 30 ? '（超卖区）' : '');
-    push('RSI(14)', B.rsi14.toFixed(1) + tag, cls);
-  }
-  if (B.vs_ma200_pct) push('距 MA200', pct(B.vs_ma200_pct), B.vs_ma200_pct >= 0 ? 'long' : 'short');
-  if (B.atr_pct) push('ATR(14)', B.atr_pct.toFixed(2) + '% 日均波幅');
-  if (B.basis_pct) push('基差', pct(B.basis_pct, 3) + (B.basis_pct >= 0 ? ' 升水' : ' 贴水'));
-  if (B.open_interest_usd) {
-    let v = '$' + fmtNum(B.open_interest_usd);
-    if (B.oi_change_pct) v += ' ' + pct(B.oi_change_pct) + '/' + B.oi_span_minutes + 'm';
-    push('持仓量', v);
-  }
-  if (B.funding_rate) {
-    push('资金费率', (B.funding_rate * 100 >= 0 ? '+' : '') + (B.funding_rate * 100).toFixed(4) + '% · '
-      + Math.round(B.funding_percentile || 0) + ' 百分位');
-  }
-  if (B.long_short_ratio) push('多空比', B.long_short_ratio.toFixed(2));
-  if (B.fear_greed) push('恐惧贪婪', B.fear_greed + ' · ' + (B.fear_greed_label || ''));
-
-  if (rows.length) {
-    document.getElementById('briefBody').innerHTML = rows.join('');
-    const hb = document.getElementById('briefHealth');
-    const ok = B.health && B.health.ok;
-    hb.className = ok ? 'badge-ok' : 'badge-bad';
-    hb.textContent = ok ? '数据完整' : '数据不完整';
-    hb.title = ((B.health && B.health.reasons) || []).join('\\n');
-    document.getElementById('briefCard').hidden = false;
-  }
+  // 健康度：不好的时候要显式说出来，藏起来会让人误以为一切正常
+  const hb = document.getElementById('healthBadge');
+  const ok = B.health && B.health.ok;
+  hb.className = ok ? 'badge-ok' : 'badge-bad';
+  hb.textContent = ok ? '数据完整' : '数据不完整';
+  hb.title = ((B.health && B.health.reasons) || []).join(' / ');
+  hb.hidden = false;
 
   const ev = B.upcoming_events || [];
   if (ev.length) {
     document.getElementById('macroBody').innerHTML = ev.map((e) => {
       const t = new Date(e.at);
       const p = (n) => String(n).padStart(2, '0');
+      const name = e.title_cn ? e.title_cn + ' <span class="f">' + e.title + '</span>' : e.title;
       return '<div class="ev"><span class="t">' + (t.getMonth() + 1) + '-' + p(t.getDate()) + ' ' +
         p(t.getHours()) + ':' + p(t.getMinutes()) + ' · ' + (e.impact || '') + '</span>' +
-        '<span class="n">' + e.title + '</span>' +
+        '<span class="n">' + name + '</span>' +
         '<span class="f">预测 ' + (e.forecast || '—') + ' · 前值 ' + (e.previous || '—') + '</span></div>';
     }).join('');
     document.getElementById('macroCard').hidden = false;
   }
+}
+
+/** 长周期序列：价格+MA200、持仓量曲线。拿不到就把对应标签页禁掉。 */
+async function loadSeries() {
+  try {
+    const res = await fetch('/api/series/' + SYMBOL);
+    if (!res.ok) return;
+    S = await res.json();
+  } catch { return; }
+  if (view === 'trend' || view === 'oi') draw();
 }
 
 let resizeTimer = 0;
@@ -920,6 +1228,7 @@ window.addEventListener('resize', () => {
 });
 load();
 loadBrief();
+loadSeries();
 </script>
 </body>
 </html>`;
