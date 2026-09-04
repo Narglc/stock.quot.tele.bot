@@ -21,12 +21,14 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
-    if (path.startsWith("/api/heatmap/")) {
-      const symbol = path.slice("/api/heatmap/".length).toUpperCase();
+    // 两类快照共用一套读写：heatmap（清算热力图）与 brief（盘面指标）
+    for (const [prefix, kind] of [["/api/heatmap/", "heatmap"], ["/api/brief/", "brief"]]) {
+      if (!path.startsWith(prefix)) continue;
+      const symbol = path.slice(prefix.length).toUpperCase();
       if (!SYMBOL_RE.test(symbol)) return json({ error: "bad symbol" }, 400);
 
-      if (request.method === "PUT") return handlePut(request, env, symbol);
-      if (request.method === "GET") return handleGet(env, symbol);
+      if (request.method === "PUT") return handlePut(request, env, kind, symbol);
+      if (request.method === "GET") return handleGet(env, kind, symbol);
       return json({ error: "method not allowed" }, 405);
     }
 
@@ -59,8 +61,19 @@ function json(obj, status = 200, extraHeaders = {}) {
   });
 }
 
+/** 每类快照的必需字段与过期时间。 */
+const SNAPSHOT_KINDS = {
+  // 拿不到新数据时宁可显示"无数据"，也不要展示一张看不出有多旧的图
+  heatmap: { ttl: 86400, hint: "missing prices/times/cells",
+             required: (b) => Array.isArray(b.prices) && Array.isArray(b.times) && Array.isArray(b.cells) },
+  // 盘面变化快，过期短一些；缺 health 说明推的不是我们认识的格式
+  brief:   { ttl: 21600, hint: "missing health",
+             required: (b) => b && typeof b === "object" && b.health },
+};
+
 /** 写入快照。用固定长度比较避免时序侧信道。 */
-async function handlePut(request, env, symbol) {
+async function handlePut(request, env, kind, symbol) {
+  const spec = SNAPSHOT_KINDS[kind];
   const expected = env.PUSH_TOKEN;
   if (!expected) return json({ error: "server missing PUSH_TOKEN" }, 500);
   if (!timingSafeEqual(request.headers.get("X-Auth-Token") || "", expected)) {
@@ -73,19 +86,16 @@ async function handlePut(request, env, symbol) {
   } catch {
     return json({ error: "invalid json" }, 400);
   }
-  if (!Array.isArray(body.prices) || !Array.isArray(body.times) || !Array.isArray(body.cells)) {
-    return json({ error: "missing prices/times/cells" }, 400);
-  }
+  if (!spec.required(body)) return json({ error: spec.hint }, 400);
 
   body.symbol = symbol;
   body.updatedAt = Date.now();
-  // 快照 24h 过期：拿不到新数据时宁可显示"无数据"，也不要展示一张看不出有多旧的图。
-  await env.LIQMAP.put(`heatmap:${symbol}`, JSON.stringify(body), { expirationTtl: 86400 });
-  return json({ ok: true, symbol, cells: body.cells.length });
+  await env.LIQMAP.put(`${kind}:${symbol}`, JSON.stringify(body), { expirationTtl: spec.ttl });
+  return json({ ok: true, kind, symbol });
 }
 
-async function handleGet(env, symbol) {
-  const raw = await env.LIQMAP.get(`heatmap:${symbol}`);
+async function handleGet(env, kind, symbol) {
+  const raw = await env.LIQMAP.get(`${kind}:${symbol}`);
   if (!raw) return json({ error: "no snapshot yet" }, 404);
   return new Response(raw, {
     headers: {
@@ -193,6 +203,21 @@ function renderPage(symbol, allowed) {
   table.dist td.px { color:var(--dim); font-size:11.5px; }
   table.dist td.cv { text-align:right; font-weight:600; }
 
+  .kv { display:flex; justify-content:space-between; gap:10px; padding:4.5px 0;
+    font-size:12.5px; font-variant-numeric:tabular-nums; border-bottom:1px solid rgba(28,36,50,.6); }
+  .kv:last-child { border-bottom:0; }
+  .kv .k { color:var(--dim); }
+  .kv .v { font-weight:600; }
+  .badge-ok { font-size:9.5px; color:var(--long); border:1px solid rgba(34,214,127,.35);
+    border-radius:4px; padding:1px 5px; letter-spacing:0; text-transform:none; }
+  .badge-bad { font-size:9.5px; color:var(--short); border:1px solid rgba(255,77,94,.4);
+    border-radius:4px; padding:1px 5px; letter-spacing:0; text-transform:none; }
+  .ev { padding:5px 0; font-size:12px; border-bottom:1px solid rgba(28,36,50,.6); }
+  .ev:last-child { border-bottom:0; }
+  .ev .t { color:var(--dim); font-size:11px; }
+  .ev .n { display:block; margin:1px 0; }
+  .ev .f { color:var(--dim); font-size:11px; }
+
   .row { display:flex; justify-content:space-between; align-items:baseline; gap:10px; padding:4.5px 0;
     font-variant-numeric:tabular-nums; font-size:12.5px; border-bottom:1px solid rgba(28,36,50,.6); }
   .row:last-child { border-bottom:0; }
@@ -245,6 +270,14 @@ function renderPage(symbol, allowed) {
   </div>
 
   <aside>
+    <div class="card" id="briefCard" hidden>
+      <h2>盘面 <span id="briefHealth"></span></h2>
+      <div id="briefBody"></div>
+    </div>
+    <div class="card" id="macroCard" hidden>
+      <h2>未来 48h 宏观</h2>
+      <div id="macroBody"></div>
+    </div>
     <div class="card">
       <h2>走到这里会扫掉多少</h2>
       <table class="dist"><tbody id="distTable"></tbody></table>
@@ -820,6 +853,65 @@ async function load() {
   rebuild();
 }
 
+/** 盘面快照与热力图相互独立：brief 拿不到不该影响爆仓地图。 */
+async function loadBrief() {
+  let B;
+  try {
+    const res = await fetch('/api/brief/' + SYMBOL);
+    if (!res.ok) return;
+    B = await res.json();
+  } catch { return; }
+
+  const pct = (v, d = 1) => (v >= 0 ? '+' : '') + v.toFixed(d) + '%';
+  const rows = [];
+  const push = (k, v, cls) => rows.push(
+    '<div class="kv"><span class="k">' + k + '</span><span class="v ' + (cls || '') + '">' + v + '</span></div>');
+
+  if (B.rsi14) {
+    // 传统超买超卖线，只标注状态，不给操作建议
+    const cls = B.rsi14 >= 70 ? 'short' : (B.rsi14 <= 30 ? 'long' : '');
+    const tag = B.rsi14 >= 70 ? '（超买区）' : (B.rsi14 <= 30 ? '（超卖区）' : '');
+    push('RSI(14)', B.rsi14.toFixed(1) + tag, cls);
+  }
+  if (B.vs_ma200_pct) push('距 MA200', pct(B.vs_ma200_pct), B.vs_ma200_pct >= 0 ? 'long' : 'short');
+  if (B.atr_pct) push('ATR(14)', B.atr_pct.toFixed(2) + '% 日均波幅');
+  if (B.basis_pct) push('基差', pct(B.basis_pct, 3) + (B.basis_pct >= 0 ? ' 升水' : ' 贴水'));
+  if (B.open_interest_usd) {
+    let v = '$' + fmtNum(B.open_interest_usd);
+    if (B.oi_change_pct) v += ' ' + pct(B.oi_change_pct) + '/' + B.oi_span_minutes + 'm';
+    push('持仓量', v);
+  }
+  if (B.funding_rate) {
+    push('资金费率', (B.funding_rate * 100 >= 0 ? '+' : '') + (B.funding_rate * 100).toFixed(4) + '% · '
+      + Math.round(B.funding_percentile || 0) + ' 百分位');
+  }
+  if (B.long_short_ratio) push('多空比', B.long_short_ratio.toFixed(2));
+  if (B.fear_greed) push('恐惧贪婪', B.fear_greed + ' · ' + (B.fear_greed_label || ''));
+
+  if (rows.length) {
+    document.getElementById('briefBody').innerHTML = rows.join('');
+    const hb = document.getElementById('briefHealth');
+    const ok = B.health && B.health.ok;
+    hb.className = ok ? 'badge-ok' : 'badge-bad';
+    hb.textContent = ok ? '数据完整' : '数据不完整';
+    hb.title = ((B.health && B.health.reasons) || []).join('\\n');
+    document.getElementById('briefCard').hidden = false;
+  }
+
+  const ev = B.upcoming_events || [];
+  if (ev.length) {
+    document.getElementById('macroBody').innerHTML = ev.map((e) => {
+      const t = new Date(e.at);
+      const p = (n) => String(n).padStart(2, '0');
+      return '<div class="ev"><span class="t">' + (t.getMonth() + 1) + '-' + p(t.getDate()) + ' ' +
+        p(t.getHours()) + ':' + p(t.getMinutes()) + ' · ' + (e.impact || '') + '</span>' +
+        '<span class="n">' + e.title + '</span>' +
+        '<span class="f">预测 ' + (e.forecast || '—') + ' · 前值 ' + (e.previous || '—') + '</span></div>';
+    }).join('');
+    document.getElementById('macroCard').hidden = false;
+  }
+}
+
 let resizeTimer = 0;
 window.addEventListener('resize', () => {
   if (!D) return;
@@ -827,6 +919,7 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(rebuild, 120);
 });
 load();
+loadBrief();
 </script>
 </body>
 </html>`;
