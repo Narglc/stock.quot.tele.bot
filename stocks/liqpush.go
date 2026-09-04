@@ -105,6 +105,18 @@ func PushBriefSnapshot(b *MarketBrief) {
 		fmt.Sprintf("盘面快照 %s（health=%v）", b.Symbol, b.Health.OK))
 }
 
+// PushSeriesSnapshot 把长周期序列推给 Worker（网页的趋势图读它）。
+func PushSeriesSnapshot(ms *MarketSeries) {
+	if ms == nil {
+		return
+	}
+	n := 0
+	if ms.Price != nil {
+		n = len(ms.Price.Points)
+	}
+	pushSnapshot("/api/series/"+ms.Symbol, ms, fmt.Sprintf("长周期序列 %s（%d 个价格点）", ms.Symbol, n))
+}
+
 // pushSnapshot 把任意 payload PUT 到 Worker 的指定路径。
 func pushSnapshot(path string, payload any, label string) {
 	if liqPushURL == "" {

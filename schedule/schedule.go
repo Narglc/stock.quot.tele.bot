@@ -61,6 +61,7 @@ const stopTimeout = 10 * time.Second
 //   - 每天早八一条完整行情面板（保底心跳）；
 //   - 每交易日 15:05 一次 A股自选股收盘播报；
 //   - 每小时 15 分组装盘面快照推给网页，30 分检查一次 claims 的证伪条件与到期；
+//   - 每天 08:20 刷新长周期序列（价格/MA200、持仓量曲线）；
 //   - apifyToken 非空时，早八/晚八各一次 BTC 清算图播报；
 //     另每 6 小时（2/8/14/20 点）刷新一次网页快照，与播报共用缓存。
 func ScheduleTask(bot *telebot.Bot, apifyToken string) {
@@ -95,6 +96,11 @@ func ScheduleTask(bot *telebot.Bot, apifyToken string) {
 	// 盘面快照：每小时 15 分组装并推给网页。错开整点，避开事件检测那一波请求。
 	if _, err := c.AddFunc("15 * * * *", func() { refreshBrief("BTC") }); err != nil {
 		log.Warnf("注册盘面快照任务失败: %v", err)
+	}
+
+	// 长周期序列：每天 08:20 刷一次。日线一天才多一个点，没必要跟着 brief 每小时推。
+	if _, err := c.AddFunc("20 8 * * *", func() { refreshSeries("BTC") }); err != nil {
+		log.Warnf("注册长周期序列任务失败: %v", err)
 	}
 
 	// claims 自动检查：每小时一次，与行情事件检测同频。

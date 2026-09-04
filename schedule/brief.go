@@ -24,3 +24,19 @@ func refreshBrief(symbol string) {
 	}
 	stocks.PushBriefSnapshot(b)
 }
+
+// refreshSeries 每天刷新一次长周期序列（价格+MA200、持仓量）。
+//
+// 与 brief 分开：序列一天才多一个点，跟着每小时的 brief 一起推等于反复搬运
+// 几十 KB 不变的历史数据。
+func refreshSeries(symbol string) {
+	if !stocks.LiqPushEnabled() {
+		return
+	}
+	ms, err := stocks.GetMarketSeries(symbol)
+	if err != nil {
+		log.Warnf("长周期序列组装失败 %s: %v", symbol, err)
+		return
+	}
+	stocks.PushSeriesSnapshot(ms)
+}
