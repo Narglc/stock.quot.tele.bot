@@ -45,6 +45,7 @@ go mod tidy
 - `/gen <描述>` — AI 生图（`handler/gen.go`）：把提示词 POST 给本地 GPU worker，取回图片作为 Photo 发出。需 `IMAGE_URL`（`handler.SetImageEndpoint` 注入），未配置时提示未启用。
 - `/watch [add|del|clear] [代码...]` — A股自选（`handler/watch.go`）。不带参展示自选行情，`add`/`del` 增删、`clear` 清空。列表按 **chat** 存（群共享一份、私聊各自一份），上限 `stocks.MaxWatchlistSize`。
 - `/claim` / `/claims` / `/resolve` — 判断追踪（`handler/claim.go`，详见下文「判断追踪」）。`/claim` 无参数时回完整用法与注意事项，**纯文本发送**——文案里有 `<判断>` 这类尖括号，用 `ModeHTML` 会被 Telegram 当未知标签拒收（踩过，表现是"没反应"）。三个命令都在 `SetCommands` 菜单里。
+- `/brief [币种]` — 完整盘面（`handler/brief.go`）：RSI/MA200/ATR/基差/持仓/费率百分位/恐惧贪婪/最近清算簇/未来 48h 宏观，附数据健康度。
 - `/help` — 命令说明（`handler/help.go`）。
 - `OnSticker` / `OnPhoto` — 用户发来的表情包/图片会被"收藏"进 Redis（当作贡品）。**确认消息只在私聊回**（群里静默收下，否则群里刷九宫格会私聊发言人九次，且对方没私聊过 bot 时必然失败）；两个集合都有 `dao.maxCollectionSize` 容量上限，超出随机弹出。
 - `OnMyChatMember` — 监听 bot 自身成员状态：被踢出/移出群时实时 `UnregisterGroup`。
@@ -68,6 +69,7 @@ go mod tidy
   - 数据 = CoinGecko `/coins/markets` + OKX 衍生品 + 全市场概览 + 恐惧贪婪，均 best-effort。`/price` 与面板共用 `stocks.FormatCryptoMessage`。
   - 历史：原来是每小时无条件发完整面板，大部分整点数字并无实质变化，久了就被自动忽略，等于没有播报。
 - A股收盘播报：`5 15 * * 1-5` 调 `broadcastAShare`（`schedule/ashare.go`），逐 chat 播报自选股。cron 的 `1-5` 排得掉周末排不掉节假日，所以再用 `stocks.AnyTraded`（全市场无成交）判一次。
+- 盘面快照：`15 * * * *` 调 `refreshBrief`（`schedule/brief.go`），组装后推给网页。错开整点避开事件检测那一波请求；只在配了 `LIQWEB_URL` 时跑。健康度异常也照推——网页需要显示「数据不完整」这件事本身，藏起来只会让人误以为一切正常。
 - 清算图播报：配 `APIFY_TOKEN` 时，`0 8 * * *` 与 `0 20 * * *` 两条独立 cron 各一次 BTC 清算图（`schedule/liqmap.go` → `stocks.BuildLiqAlbum` → 相册）。注意不能写成 `0 8/20 * * *`——那在 cron 语义里是「从 8 点起每 20 小时」，只会命中 8 点。另有 `0 2,8,14,20 * * *` 刷新网页快照（`refreshLiqSnapshot`），故意与播报对齐到同一分钟以共用 Apify 调用。
 - 发送失败且 `IsBotEvicted` 判定 bot 已被移出时自动 `UnregisterGroup`（提醒与行情共用 `broadcastToGroups`）。
 - 群列表是内存态（`gohome.go:groupMap`，进程重启后由 `LoadGroups()` 从 Redis 恢复），由 `groupMu sync.RWMutex` 保护，只经导出的线程安全函数访问：`RegisterGroup`/`UnregisterGroup`/`IsRegistered`/`GroupCount`/`SnapshotGroupIDs`。广播先 `SnapshotGroupIDs()` 取 id 快照再逐个发送，避免持锁做网络 I/O、以及遍历中调 `UnregisterGroup` 自死锁（并发安全由 `schedule/group_test.go` 的 `-race` 压测覆盖）。
@@ -104,6 +106,16 @@ go mod tidy
 - 通知发回**记录这条 claim 的那个 chat**，不广播。
 - `/claims export` 导出 jsonl，字段名对齐 `claims.jsonl` 的约定（`basis` / `falsify_cond` / `conclusion`）。
 
+### 盘面快照（stocks/brief.go + indicators.go + macro.go）
+`MarketBrief` 把指标、衍生品、情绪、清算簇、宏观揉成一份 JSON，网页面板和 MCP `get_market_brief` 共用。
+
+- **指标只收互不重复的**（`indicators.go`）：RSI/MACD/Stochastic/Williams %R 都是 OHLCV 推的动量，全加一遍等于把同一视角看五遍。动量留 RSI 一个，名额给真正换了数据维度的：`basis`（永续−现货）、`OI`、清算簇距离。RSI/ATR 用 Wilder 平滑，有教科书样例守着（`TestRSI_WilderReference`）。
+- **ATR 有个特殊用途**：`FalsifyDistanceOK` 判断 claim 的证伪条件离现价够不够远。设在 0.5×ATR 以内的条件一天就会被随机波动触发，那条 claim 测的是噪声不是判断。
+- **组装绝不触发 Apify**：清算簇只读缓存（`liqMapCachedOnly`）。brief 每小时跑一次，真去打 Apify 一天 24 次，而免费档一天只有 5 次。
+- **每个来源带自己的时间戳**，不是一个全局时间。`briefSources` 声明各源的最大陈旧度与是否关键，`evalHealth` 据此产出 `health.{ok,reasons}`。**关键源失败或陈旧 → ok=false**，网页显示红徽章，agent 看到应只报数据质量问题、不产出行情判断——在坏数据上写出来的判断比没有判断更糟。
+- **宏观两个源分工不同**（`macro.go`）：ForexFactory 免费周历给「什么时候有什么事件 + 预测值/前值」，**它没有 actual 字段**，公布后不回填；BLS 官方 API（免费无需 key）给已公布的实际值。别把两者搞混。
+- `OIToMarketCapPct` 的分子只是 **OKX 单家**持仓，不是全市场，别当系统总杠杆读。
+
 ### 清算图网页（deploy/liqmap-web/）
 Cloudflare Worker + KV 的只读网页。**数据性质先搞清楚**：CoinAnk 基于 **Binance 合约**持仓推算的**待爆仓分布**——是预估，不是已成交清算；actor 只覆盖 Binance 一家，输出里没有现价（现价是 bot 拉 Apify 的同一刻从 OKX 取的）。页面顶部标「数据截至」（热力图最后一列时间戳）与「拉取于」两个精确时刻，不用"N 分钟前"。
 
@@ -120,6 +132,7 @@ Cloudflare Worker + KV 的只读网页。**数据性质先搞清楚**：CoinAnk 
 ### MCP 发消息服务（mcpserver/ + sender/ + tgmd/）
 供自己的 agent 通过 MCP 发消息。`config.MCP.TargetChatID != 0` 时，`main.go` 构造 `TelegramSender` 注册进 `sender` 注册表并在 goroutine 启动 `mcpserver.Serve`（`mark3labs/mcp-go`，Streamable HTTP，默认 `127.0.0.1:8081/mcp`）。
 - tool：`send_message(platform="telegram", text)`，`text` 为标准 markdown。
+- tool：`get_market_brief(symbol)` —— 完整盘面 JSON。描述里明确要求调用方**先看 `health.ok`**，为 false 时不要在这份数据上下行情判断。
 - tool：`get_liqmap(symbol, top_n)` —— 配了 `APIFY_TOKEN` 才注册。返回**结构化 JSON 而非 PNG**（agent 要的是能参与推理的数字），上下方清算簇强制两边都返回并附 `note` 说明口径：只看一边会得出无法证伪的方向结论。
 - 发送链路：`tgmd.Convert`（`goldmark` 解析 AST → 只输出 Telegram 支持的 HTML 标签子集，标题/列表/表格降级）→ `bot.Send(ParseMode=HTML)`；HTML 失败降级为原始 markdown 纯文本重发。
 - **鉴权（`mcpserver/jwtauth.go`）**：`mcp.jwt_secret`（`MCP_JWT_SECRET`）非空则启用 JWT Bearer 鉴权，中间件校验 HS256 签名（显式拒 `alg=none`）+ `exp`；为空则免鉴权（仅回环用，向后兼容）。

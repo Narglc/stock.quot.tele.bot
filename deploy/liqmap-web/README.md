@@ -176,11 +176,27 @@ LIVE=1 APIFY_TOKEN=xxx SNAPSHOT_OUT=deploy/liqmap-web/test/fixtures/btc-snapshot
 落盘的就是 bot 推给 Worker 的那份格式（`stocks.buildSnapshot`），所以预览看到的和线上完全一致。
 想换币种加 `SNAPSHOT_SYMBOL=ETH`。快照文件建议入库，方便在没有 token 的机器上也能看预览、跑测试。
 
+## 页面上的盘面面板
+
+除爆仓地图外，页面右侧还有两张卡片，数据来自 bot 每小时推的 `brief` 快照
+（`PUT /api/brief/:symbol`，与 heatmap 共用一套读写和鉴权）：
+
+- **盘面**：RSI(14)、距 MA200、ATR、基差、持仓量、资金费率及其历史百分位、多空比、恐惧贪婪。
+  标题右侧有健康度徽章，红色表示某个数据源失败或陈旧，鼠标悬停看原因。
+- **未来 48h 宏观**：ForexFactory 的美国 High 级事件，带预测值与前值。
+
+两份快照相互独立：brief 拿不到不影响爆仓地图，反之亦然。
+
 ## 测试
 
 ```bash
 npm test        # 页面纯逻辑：坐标换算、稀疏展开、颜色映射
 ```
+
+`page.test.mjs` 单独编译一次渲染出来的页面脚本。**这个测试是必须的**：页面 HTML 是
+worker.js 里的一个模板字符串，`node --check src/worker.js` 只检查外层模块，看不进模板字符串；
+而且模板字符串会自己解析转义，源码里写 `'\n'` 到了输出就变成真实换行，直接语法错误、页面白屏。
+踩过一次，只有把渲染结果单独编译才能抓到。
 
 canvas 的实际绘制没法在无头环境验证，但真正容易出错的是坐标换算（价格轴自下而上，
 y 要从底部量起）、稀疏展开的越界处理、颜色的对数映射——这些都在 `src/worker.js` 的
