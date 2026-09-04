@@ -41,6 +41,18 @@ func liqLock(symbol string) *sync.Mutex {
 	return mu
 }
 
+// liqMapCachedOnly 只从缓存取热力图，**绝不触发 Apify 调用**。
+//
+// 给 MarketBrief 这类高频组装用：brief 每小时跑一次，真去打 Apify 一天就是 24 次，
+// 而免费档一天只有 5 次。拿不到就让调用方留空。
+func liqMapCachedOnly(symbol string) (*LiqHeatmap, bool) {
+	sym, err := NormalizeSymbol(symbol)
+	if err != nil {
+		return nil, false
+	}
+	return liqCache.get(sym)
+}
+
 // symbolPattern 限制币种符号的形状：只允许字母数字、1~10 位。
 var symbolPattern = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
 
