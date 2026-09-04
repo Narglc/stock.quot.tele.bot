@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	log "github.com/narglc/stock.quot.tele.bot/pkg/logger"
 )
 
 // A 股行情数据源用东方财富 push2 而不是雪球：
@@ -111,31 +113,68 @@ func secid(code string) string {
 // stockCache 缓存 A 股行情。盘中 15s 足够新鲜，也挡住了重复查询。
 var stockCache = newTTLCache[[]StockQuote](15 * time.Second)
 
+// stockSource 是一个 A 股行情来源。多源故障转移：实测东财主站的批量接口
+// ulist.np 会间歇性 502 / 连接失败（生产上遇到过），而同一接口在 push2delay 上正常。
+type stockSource struct {
+	name     string
+	realtime bool // 盘中是否实时。延迟源在收盘播报里可能给出收盘前的价格
+	fetch    func(codes []string) ([]StockQuote, error)
+}
+
+// stockSources 按优先级排列。
+//
+// 顺序有讲究：腾讯排在 push2delay 前面，因为 push2delay 盘中可能有 15 分钟延迟，
+// 而腾讯是实时的。收盘播报要的是定盘价，用延迟源会拿到收盘前的数据却标成「收盘」。
+var stockSources = []stockSource{
+	{"eastmoney/push2", true, func(c []string) ([]StockQuote, error) { return fetchEastMoney("push2", c) }},
+	{"tencent", true, fetchTencent},
+	{"eastmoney/push2delay", false, func(c []string) ([]StockQuote, error) { return fetchEastMoney("push2delay", c) }},
+}
+
 // GetStockQuotes 批量查询 A 股行情，按传入顺序返回（查不到的会被跳过）。
+// 逐个来源尝试，任一成功即返回；全部失败才报错。
 func GetStockQuotes(codes []string) ([]StockQuote, error) {
 	if len(codes) == 0 {
 		return nil, nil
 	}
-
-	ids := make([]string, 0, len(codes))
-	for _, c := range codes {
-		ids = append(ids, secid(c))
-	}
-	cacheKey := strings.Join(ids, ",")
-
+	cacheKey := strings.Join(codes, ",")
 	if cached, ok := stockCache.get(cacheKey); ok {
 		return cached, nil
 	}
 
-	url := "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=" + cacheKey +
-		"&fields=f2,f3,f4,f5,f6,f8,f12,f14,f15,f16,f17,f18"
+	var lastErr error
+	for i, src := range stockSources {
+		qs, err := src.fetch(codes)
+		if err == nil && len(qs) > 0 {
+			if i > 0 {
+				// 主源失败过就说一声：延迟源在盘中给的可能不是最新价
+				log.Warnf("A股行情由备用源 %s 提供（实时:%v），主源失败: %v", src.name, src.realtime, lastErr)
+			}
+			stockCache.set(cacheKey, qs)
+			return qs, nil
+		}
+		if err == nil {
+			err = fmt.Errorf("返回空结果")
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("所有 A股行情源均失败，最后一个错误: %w", lastErr)
+}
+
+// fetchEastMoney 从指定东财主机拉行情。
+func fetchEastMoney(host string, codes []string) ([]StockQuote, error) {
+	ids := make([]string, 0, len(codes))
+	for _, c := range codes {
+		ids = append(ids, secid(c))
+	}
+	url := "https://" + host + ".eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=" +
+		strings.Join(ids, ",") + "&fields=f2,f3,f4,f5,f6,f8,f12,f14,f15,f16,f17,f18"
 
 	var resp emResponse
-	if err := fetchJSON(marketClient, "A股行情", url, &resp); err != nil {
+	if err := fetchJSON(marketClient, "A股行情("+host+")", url, &resp); err != nil {
 		return nil, err
 	}
 
-	// 按代码建索引，保持调用方传入的顺序。
 	byCode := make(map[string]emQuote, len(resp.Data.Diff))
 	for _, q := range resp.Data.Diff {
 		byCode[q.Code] = q
@@ -148,22 +187,13 @@ func GetStockQuotes(codes []string) ([]StockQuote, error) {
 			continue
 		}
 		out = append(out, StockQuote{
-			Code:         q.Code,
-			Name:         q.Name,
-			Price:        float64(q.Price),
-			ChangePct:    float64(q.ChangePct),
-			Change:       float64(q.Change),
-			PrevClose:    float64(q.PrevClose),
-			Open:         float64(q.Open),
-			High:         float64(q.High),
-			Low:          float64(q.Low),
-			Volume:       float64(q.Volume),
-			Amount:       float64(q.Amount),
-			TurnoverRate: float64(q.Turnover),
+			Code: q.Code, Name: q.Name,
+			Price: float64(q.Price), ChangePct: float64(q.ChangePct), Change: float64(q.Change),
+			PrevClose: float64(q.PrevClose), Open: float64(q.Open),
+			High: float64(q.High), Low: float64(q.Low),
+			Volume: float64(q.Volume), Amount: float64(q.Amount), TurnoverRate: float64(q.Turnover),
 		})
 	}
-
-	stockCache.set(cacheKey, out)
 	return out, nil
 }
 
