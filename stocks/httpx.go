@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/narglc/stock.quot.tele.bot/utils"
@@ -19,6 +20,16 @@ var marketClient = &http.Client{Timeout: 10 * time.Second}
 // 限流/故障页可能有几 KB，整段打进日志会把日志文件冲爆。
 const maxErrBody = 200
 
+// postJSON POST 一段 JSON 并把响应反序列化到 v。校验逻辑与 fetchJSON 一致。
+func postJSON(client *http.Client, name, url, body string, v any) error {
+	resp, err := client.Post(url, "application/json", strings.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("%s 请求失败: %w", name, err)
+	}
+	defer resp.Body.Close()
+	return decodeJSON(name, resp, v)
+}
+
 // fetchJSON GET 一个 URL，校验 HTTP 状态码后把响应体反序列化到 v。
 //
 // 显式检查状态码很重要：CoinGecko 免费额度被打满时返回 429 + 一段说明文本，
@@ -30,16 +41,18 @@ func fetchJSON(client *http.Client, name, url string, v any) error {
 		return fmt.Errorf("%s 请求失败: %w", name, err)
 	}
 	defer resp.Body.Close()
+	return decodeJSON(name, resp, v)
+}
 
+// decodeJSON 校验状态码并反序列化，GET/POST 共用。
+func decodeJSON(name string, resp *http.Response, v any) error {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return fmt.Errorf("%s 读取失败: %w", name, err)
 	}
-
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%s HTTP %d: %s", name, resp.StatusCode, utils.Truncate(string(body), maxErrBody))
 	}
-
 	if err := json.Unmarshal(body, v); err != nil {
 		return fmt.Errorf("%s 解析失败: %w, body: %s", name, err, utils.Truncate(string(body), maxErrBody))
 	}
