@@ -68,7 +68,7 @@ go mod tidy
   - `dailyDigest`（`0 8 * * *`）—— 每天早八无条件发一次完整面板，作为**保底心跳**。纯静默模式下「没异动」和「bot 挂了」看起来一模一样。面板消息**静音 + 删旧发新**（上一条 id 存 Redis `tg:gohome:bcast`），群里只保留最新一条。
   - 数据 = CoinGecko `/coins/markets` + OKX 衍生品 + 全市场概览 + 恐惧贪婪，均 best-effort。`/price` 与面板共用 `stocks.FormatCryptoMessage`。
   - 历史：原来是每小时无条件发完整面板，大部分整点数字并无实质变化，久了就被自动忽略，等于没有播报。
-- A股收盘播报：`5 15 * * 1-5` 调 `broadcastAShare`（`schedule/ashare.go`），逐 chat 播报自选股。cron 的 `1-5` 排得掉周末排不掉节假日，所以再用 `stocks.AnyTraded`（全市场无成交）判一次。
+- A股收盘播报：`20 15 * * 1-5` 调 `broadcastAShare`（`schedule/ashare.go`），逐 chat 播报自选股。cron 的 `1-5` 排得掉周末排不掉节假日，所以再用 `stocks.AnyTraded`（全市场无成交）判一次。**不要改回 15:05**——行情源里有延迟源（`push2delay` 盘中可能滞后 15 分钟），故障转移到它时 15:05 拿到的可能还是 14:50 的价格却标成「收盘」。
 - 盘面快照：`15 * * * *` 调 `refreshBrief`（`schedule/brief.go`），组装后推给网页。错开整点避开事件检测那一波请求；只在配了 `LIQWEB_URL` 时跑。健康度异常也照推——网页需要显示「数据不完整」这件事本身，藏起来只会让人误以为一切正常。
 - 清算图播报：配 `APIFY_TOKEN` 时，`0 8 * * *` 与 `0 20 * * *` 两条独立 cron 各一次 BTC 清算图（`schedule/liqmap.go` → `stocks.BuildLiqAlbum` → 相册）。注意不能写成 `0 8/20 * * *`——那在 cron 语义里是「从 8 点起每 20 小时」，只会命中 8 点。另有 `0 2,8,14,20 * * *` 刷新网页快照（`refreshLiqSnapshot`），故意与播报对齐到同一分钟以共用 Apify 调用。
 - 发送失败且 `IsBotEvicted` 判定 bot 已被移出时自动 `UnregisterGroup`（提醒与行情共用 `broadcastToGroups`）。
@@ -88,8 +88,17 @@ go mod tidy
 - **首次观测只记基线、不报事件**——否则进程一重启就把所有「当前处于极端状态」的币全报一遍，而它们可能已经在那个状态待了一整天。
 - 文案只描述「发生了什么」，不给「所以该做什么」。方向性结论无法证伪。
 
-### A股行情（stocks/ashare.go）
-数据源是**东方财富 push2**，不是雪球：雪球 `quotec` 要先拿 `xq_a_token` cookie 且对机房 IP 直接 403；腾讯/新浪返回 GBK 分隔字符串还要转码按位解析。东财免鉴权、UTF-8 JSON、一次可查多只。
+### A股行情（stocks/ashare.go + ashare_tencent.go）
+**三个源按优先级故障转移**（`stockSources`）：东财 push2 → 腾讯 → 东财 push2delay。
+生产上遇到过东财主站的批量接口 `ulist.np` 间歇性 502 / 连接失败（单只查询却正常），
+而同一接口在 `push2delay` 上没事——两个主机共用后端，所以还需要腾讯这个真正独立的源兜底。
+
+**顺序有讲究**：腾讯排在 `push2delay` 前面，因为后者盘中可能滞后 15 分钟。收盘播报要的是定盘价。
+
+- 东财：免鉴权、UTF-8 JSON、一次可查多只，是首选。不用雪球是因为 `quotec` 要先拿 `xq_a_token` cookie 且对机房 IP 直接 403。
+- 腾讯：GBK 编码的 `~` 分隔字符串，要转码按位解析（`ashare_tencent.go`，字段下标有常量注释，无官方文档，改前用真实响应核对）。成交额是**万元**，转成元与东财口径对齐。
+- 实测三者数据逐字段一致（现价/涨跌幅/高低全同）。
+- 排障时看日志里的「A股行情由备用源 X 提供」——出现这行说明主源在故障。
 
 - `secid` 前缀：6/5/9 开头归上交所（`1.`），其余归深/北（`0.`）。
 - `flexFloat` 兼容东财在停牌时把数字字段返回成 `"-"`，单字段解析失败不毁掉整条行情。

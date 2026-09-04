@@ -59,7 +59,7 @@ const stopTimeout = 10 * time.Second
 //   - 工作日 TaskList 的每个 HH:MM 各一条提醒任务；
 //   - 每小时整点检测一次行情事件（有异动才播报），启动时先跑一次建立基线；
 //   - 每天早八一条完整行情面板（保底心跳）；
-//   - 每交易日 15:05 一次 A股自选股收盘播报；
+//   - 每交易日 15:20 一次 A股自选股收盘播报（躲开延迟源的滞后）；
 //   - 每小时 15 分组装盘面快照推给网页，30 分检查一次 claims 的证伪条件与到期；
 //   - 每天 08:20 刷新长周期序列（价格/MA200、持仓量曲线）；
 //   - apifyToken 非空时，早八/晚八各一次 BTC 清算图播报；
@@ -108,9 +108,13 @@ func ScheduleTask(bot *telebot.Bot, apifyToken string) {
 		log.Warnf("注册 claims 检查任务失败: %v", err)
 	}
 
-	// A股收盘播报：每交易日 15:05（收盘后 5 分钟，确保拿到定盘数据）。
+	// A股收盘播报：每交易日 15:20。
+	//
+	// 为什么不是 15:05：行情源里有延迟源（东财 push2delay 盘中可能滞后 15 分钟），
+	// 主源故障转移到它时，15:05 取到的可能还是 14:50 的价格，却会被标成「收盘」。
+	// 推迟到 15:20 让任何一个源都已经追上定盘数据。
 	// 节假日靠「全市场无成交」在 broadcastAShare 里再判一次。
-	if _, err := c.AddFunc("5 15 * * 1-5", func() { broadcastAShare(bot) }); err != nil {
+	if _, err := c.AddFunc("20 15 * * 1-5", func() { broadcastAShare(bot) }); err != nil {
 		log.Warnf("注册 A股收盘播报任务失败: %v", err)
 	}
 
