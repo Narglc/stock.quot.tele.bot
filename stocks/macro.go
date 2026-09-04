@@ -19,11 +19,50 @@ import (
 // MacroEvent 是一条宏观日历事件。
 type MacroEvent struct {
 	Title    string    `json:"title"`
+	TitleCN  string    `json:"title_cn,omitempty"` // 常见事件的中文名，认不出就留空
 	Country  string    `json:"country"`
 	Impact   string    `json:"impact"` // High / Medium / Low
 	At       time.Time `json:"at"`
 	Forecast string    `json:"forecast,omitempty"`
 	Previous string    `json:"previous,omitempty"`
+}
+
+// eventCN 是高频宏观事件的中文名。
+// 只收**真正常见**的：认不出就留空让原名兜底，胡乱直译比不译更糟。
+var eventCN = map[string]string{
+	"Non-Farm Employment Change":     "非农就业人口变化",
+	"ADP Non-Farm Employment Change": "ADP 就业人数变化",
+	"Unemployment Rate":              "失业率",
+	"Average Hourly Earnings m/m":    "平均时薪月率",
+	"JOLTS Job Openings":             "JOLTS 职位空缺",
+	"Unemployment Claims":            "初请失业金人数",
+	"CPI m/m":                        "CPI 月率",
+	"CPI y/y":                        "CPI 年率",
+	"Core CPI m/m":                   "核心 CPI 月率",
+	"PPI m/m":                        "PPI 月率",
+	"Core PPI m/m":                   "核心 PPI 月率",
+	"Core PCE Price Index m/m":       "核心 PCE 物价指数月率",
+	"FOMC Statement":                 "FOMC 政策声明",
+	"FOMC Meeting Minutes":           "FOMC 会议纪要",
+	"FOMC Press Conference":          "FOMC 新闻发布会",
+	"Federal Funds Rate":             "联邦基金利率",
+	"Fed Chair Powell Speaks":        "美联储主席鲍威尔讲话",
+	"ISM Manufacturing PMI":          "ISM 制造业 PMI",
+	"ISM Services PMI":               "ISM 服务业 PMI",
+	"Flash Manufacturing PMI":        "制造业 PMI 初值",
+	"Flash Services PMI":             "服务业 PMI 初值",
+	"Advance GDP q/q":                "GDP 季率初值",
+	"Prelim GDP q/q":                 "GDP 季率修正值",
+	"Retail Sales m/m":               "零售销售月率",
+	"Core Retail Sales m/m":          "核心零售销售月率",
+	"Consumer Confidence":            "消费者信心指数",
+	"Prelim UoM Consumer Sentiment":  "密歇根大学消费者信心初值",
+	"Crude Oil Inventories":          "EIA 原油库存",
+	"Building Permits":               "营建许可",
+	"Existing Home Sales":            "成屋销售",
+	"Durable Goods Orders m/m":       "耐用品订单月率",
+	"Trade Balance":                  "贸易帐",
+	"Treasury Currency Report":       "财政部汇率报告",
 }
 
 // ffEvent 对应 ForexFactory 周历 JSON 的单条。
@@ -60,7 +99,7 @@ func GetMacroCalendar(minImpact string, countries []string) ([]MacroEvent, error
 			continue // 单条时间格式异常不该毁掉整个日历
 		}
 		out = append(out, MacroEvent{
-			Title: e.Title, Country: e.Country, Impact: e.Impact,
+			Title: e.Title, TitleCN: eventCN[e.Title], Country: e.Country, Impact: e.Impact,
 			At: at, Forecast: e.Forecast, Previous: e.Previous,
 		})
 	}
